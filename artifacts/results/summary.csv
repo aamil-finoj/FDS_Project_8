@@ -1,0 +1,16 @@
+part,quantity,value (mean ± sd over seeds)
+Part 4,"baseline excess NLL, single Gaussian (M=1)",1.678 ± 0.000
+Part 4,"baseline excess NLL, MDN (M=3)",0.030 ± 0.007
+Part 4,"baseline W1, single Gaussian / MDN M=3",0.448 ± 0.000 / 0.040 ± 0.022
+Part 4,"residual sd (true t / MDN / single Gauss. / MSE), sigma = 0.15",0.151 / 0.161 / 2.626 / 1.198
+Part 5,q = 0.5: MDN M=3 minority capture / recovery rate,0.995 ± 0.045 / 1.000 ± 0.000
+Part 5,q = 0.7: MDN M=3 minority capture / recovery rate,0.980 ± 0.024 / 1.000 ± 0.000
+Part 5,q = 0.9: MDN M=3 minority capture / recovery rate,0.917 ± 0.069 / 1.000 ± 0.000
+Part 5,q = 0.97: MDN M=3 minority capture / recovery rate,0.907 ± 0.055 / 1.000 ± 0.000
+Part 5,MDN runs (M>1) with minority recovery < 0.9,0 of 60
+Part 5,"q = 0.9, floor 1e-05: excess NLL / minority capture",0.040 ± 0.013 / 0.937 ± 0.056
+Part 5,"q = 0.9, floor 0.1: excess NLL / minority capture",0.909 ± 0.001 / 0.428 ± 0.010
+Extension,"sigma = 0.05, q = 0.9, MDN M=3: excess NLL / W1 / minority capture",0.091 ± 0.007 / 0.038 ± 0.017 / 0.948 ± 0.142
+Extension,"sigma = 0.15, q = 0.9, MDN M=3: excess NLL / W1 / minority capture",0.035 ± 0.005 / 0.032 ± 0.009 / 0.917 ± 0.069
+Extension,"sigma = 0.3, q = 0.9, MDN M=3: excess NLL / W1 / minority capture",0.032 ± 0.003 / 0.029 ± 0.008 / 0.961 ± 0.073
+Extension,"sigma = 0.5, q = 0.9, MDN M=3: excess NLL / W1 / minority capture",0.028 ± 0.004 / 0.033 ± 0.007 / 0.898 ± 0.054

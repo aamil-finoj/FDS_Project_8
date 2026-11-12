@@ -1,0 +1,60 @@
+{
+  "single_gaussian": {
+    "code": "v1",
+    "kind": "mdn",
+    "data": {
+      "a": 2.0,
+      "sigma": 0.15,
+      "q": 0.5,
+      "n_train": 10000,
+      "n_val": 2000,
+      "n_test": 2000,
+      "data_seed": 2026
+    },
+    "train": {
+      "hidden": 64,
+      "n_layers": 3,
+      "lr": 0.002,
+      "batch_size": 256,
+      "max_epochs": 400,
+      "patience": 40,
+      "grad_clip": 5.0,
+      "weight_decay": 0.0
+    },
+    "mdn": {
+      "M": 1,
+      "var_floor": 0.0001,
+      "mu_init": "default"
+    },
+    "seed": 0
+  },
+  "mdn": {
+    "code": "v1",
+    "kind": "mdn",
+    "data": {
+      "a": 2.0,
+      "sigma": 0.15,
+      "q": 0.5,
+      "n_train": 10000,
+      "n_val": 2000,
+      "n_test": 2000,
+      "data_seed": 2026
+    },
+    "train": {
+      "hidden": 64,
+      "n_layers": 3,
+      "lr": 0.002,
+      "batch_size": 256,
+      "max_epochs": 400,
+      "patience": 40,
+      "grad_clip": 5.0,
+      "weight_decay": 0.0
+    },
+    "mdn": {
+      "M": 3,
+      "var_floor": 0.0001,
+      "mu_init": "default"
+    },
+    "seed": 0
+  }
+}

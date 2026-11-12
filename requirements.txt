@@ -1,0 +1,12 @@
+# Tested with Python 3.13. For an NVIDIA GPU install torch from the CUDA index first, e.g.:
+#   pip install torch --index-url https://download.pytorch.org/whl/cu126
+# (CPU-only also works; all networks are tiny.)
+torch>=2.5
+numpy>=2.0
+scipy>=1.13
+matplotlib>=3.8
+pandas>=2.2
+jupyter
+nbconvert
+nbformat
+ipykernel
