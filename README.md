@@ -119,6 +119,13 @@ the optimum is the **conditional mean** $\mathbb E[t\mid x]$:
 Our network reached the Bayes-optimal MSE (1.3388 against 1.3386 for the exact conditional mean). It
 is a perfect estimator of a summary that is useless for this problem.
 
+**Extra: absolute-error (MAE) network (notebook §4.1).** The same network trained with $|f-t|$ learns
+the conditional **median**. With $q=0.9$ that lands on the majority branch: a valid answer, but only one
+of the two. With the symmetric prior the median is 0, but the loss is almost flat across the whole gap, so
+the trained networks wander inside it and partly drift onto the $+$ branch (following a 50.8% sign
+imbalance in the training sample). Changing the point loss changes *which* single answer you get, never
+the fact that there is only one.
+
 ### (b) Mixture density network, MDN (Part 3)
 
 $$p_\theta(t\mid x)=\sum_{j=1}^{M}\pi_j(x)\,\mathcal N\big(t\mid\mu_j(x),v_j(x)\big),\qquad
@@ -136,7 +143,7 @@ $t=30$, while logsumexp gives −3105.
 This is literally the MDN with $M=1$: the same code, a different $M$. It models uncertainty, but with
 only one bump.
 
-### Experiments (~180 networks)
+### Experiments (~190 networks)
 
 | Experiment | What varies | Runs |
 |---|---|---|
@@ -146,6 +153,7 @@ only one bump.
 | Variance floor | $v_{\min}\in\lbrace 10^{-5},\dots,10^{-1}\rbrace$, $q=0.9$ | 25 |
 | Noise robustness | $\sigma\in\lbrace 0.05,0.15,0.3,0.5\rbrace$ × $q\in\lbrace 0.5,0.9\rbrace$ × $M\in\lbrace 1,3\rbrace$ | 80 |
 | MSE networks | $q\in\lbrace 0.5,0.9\rbrace$ | 2 |
+| MAE (median) networks, §4.1 | $q\in\lbrace 0.5,0.9\rbrace$ × 5 seeds | 10 |
 
 Overlapping settings are trained once and reused. The dataset is fixed by `data_seed`, so only the
 initialisation seed varies and the spread across seeds isolates optimisation randomness.

@@ -9,6 +9,7 @@ FIG_DIR = Path("figures")
 COLORS = {
     "reference": "#222222",
     "mse": "#d62728",
+    "mae": "#9467bd",
     "single": "#ff7f0e",
     "mdn": "#1f77b4",
     "branch": "#2ca02c",
