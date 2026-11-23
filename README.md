@@ -162,7 +162,9 @@ initialisation seed varies and the spread across seeds isolates optimisation ran
 | **Forward residual** | $r=x-\tilde t^2$, with $\tilde t$ sampled from the model | If the model is exact, $r\sim\mathcal N(0,\sigma^2)$. The target is sd ≈ σ, **not 0**, because the data is noisy |
 
 A Gaussian mixture has unbounded support, while the true posterior lives on $[-a,a]$. We report the
-leaked mass separately (about 0.7% for the MDN) and truncate only for the grid-based metrics.
+leaked mass separately (about 0.7–0.9% for the standard MDN) and truncate only for the grid-based
+metrics; in §5.5 we also evaluate a truncated-component MDN (`MDNConfig(truncate=True)`), which
+eliminates out-of-support leakage (`0.000`) and cuts baseline excess NLL from ~0.031 to ~0.019 nats.
 
 ---
 

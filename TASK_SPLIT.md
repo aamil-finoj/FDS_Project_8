@@ -85,7 +85,7 @@ Mention results in your segment only if they are finished and checked.
 |---|---|
 | Ashwath | Make the quadrature for Z(x) faster or vectorised without losing accuracy (check against the 400 001-point grid) |
 | Joel | Add an absolute-loss (median) network next to the MSE network, to show it also lands off the branches |
-| Arnav | Try truncated mixtures to remove the about 0.7% of mass that leaks outside [−a, a] |
+| Arnav | Try truncated mixtures to remove the about 0.7% of mass that leaks outside [−a, a]. **Done: notebook §5.5** (`truncate=True` cuts leaked mass to `0.000` everywhere and reduces baseline excess NLL from ~0.031 to ~0.019 nats) |
 | Aamil | Choose M by held-out NLL across M ∈ {1, 2, 3, 5} and justify the pick |
 | Rohan | Test smaller training sets and more extreme imbalance (the README lists this as untested) |
 | Advay | Look at the prior's jump at t = 0 at high noise, which a smooth mixture can only approximate |
