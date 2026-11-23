@@ -40,6 +40,7 @@ answer. It isn't broken; it was asked for one number when there are two answers.
 it's near +1, 50% chance it's near −1." That is exactly the right answer.
 
 **The tricky tests.**
+
 * **Unfair game:** I pick positive numbers 97% of the time. Does the smart robot still remember that
   −1 is possible? Yes, as long as it is allowed to draw at least two "bumps."
 * **Blurry game:** I add a bigger wobble. Does it still work? Yes, just a bit less precisely.
@@ -55,17 +56,21 @@ precisely rather than eyeballing them.
 ## 2. The problem, properly
 
 ### The generative model
+
 $$t \sim \mathrm{Unif}[-a,a],\qquad x = t^2+\epsilon,\qquad \epsilon\sim\mathcal N(0,\sigma^2)$$
+
 Baseline: $a=2$, $\sigma=0.15$. The task is to infer $t$ from $x$.
 
 The forward map $t\mapsto t^2$ is not injective, so the inverse problem has **no unique solution**.
 The right thing to estimate is not a function $x\mapsto t$ but the **conditional distribution**
 $p(t\mid x)$.
 
-### The exact posterior (assignment Part 1)
+### The exact posterior (Part 1)
 By Bayes' rule, after the constants cancel,
+
 $$p(t\mid x)=\frac{\exp\big[-\tfrac{(x-t^2)^2}{2\sigma^2}\big]}{Z(x)}\,\mathbb 1_{[-a,a]}(t),\qquad
 Z(x)=\int_{-a}^{a}e^{-(x-u^2)^2/2\sigma^2}\,du .$$
+
 $Z(x)$ has no closed form, so it is computed with `scipy.integrate.quad`. To keep this stable we
 subtract the maximum of the log integrand, split the integral at 0, and give `quad` the peak
 locations as break points. Checks: the density integrates to 1, it is symmetric, and the results
@@ -102,8 +107,11 @@ reporting.
 
 ### (a) MSE network (Part 2)
 Outputs one number $f_\theta(x)$ and minimises $\frac1N\sum(f_\theta(x_i)-t_i)^2$. Since
-$$\mathbb E[(f-t)^2]=\mathbb E[(f-\mathbb E[t|x])^2]+\mathbb E[\mathrm{Var}(t|x)],$$
+
+$$\mathbb E[(f-t)^2]=\mathbb E[(f-\mathbb E[t\mid x])^2]+\mathbb E[\mathrm{Var}(t\mid x)],$$
+
 the optimum is the **conditional mean** $\mathbb E[t\mid x]$:
+
 * with a symmetric prior this is **0** everywhere, between the branches;
 * with $q=0.9$ it is $\approx(2q-1)\sqrt x = 0.8\sqrt x$, still not on a branch.
 
@@ -111,11 +119,15 @@ Our network reached the Bayes-optimal MSE (1.3388 against 1.3386 for the exact c
 is a perfect estimator of a summary that is useless for this problem.
 
 ### (b) Mixture density network, MDN (Part 3)
+
 $$p_\theta(t\mid x)=\sum_{j=1}^{M}\pi_j(x)\,\mathcal N\big(t\mid\mu_j(x),v_j(x)\big),\qquad
 \pi=\mathrm{softmax}(\alpha),\quad v_j=\mathrm{softplus}(s_j)+v_{\min}.$$
+
 Valid weights and positive variances hold by construction. $v_{\min}=10^{-4}$ is a *variance*
 floor. The loss is the average negative log-likelihood, evaluated in log space:
+
 $$-\log p = -\operatorname{logsumexp}_j\Big[\log\pi_j-\tfrac12\log(2\pi v_j)-\tfrac{(t-\mu_j)^2}{2v_j}\Big].$$
+
 The naive "sum the densities, then take the log" underflows. We show it returning $-\infty$ at
 $t=30$, while logsumexp gives −3105.
 
@@ -127,12 +139,12 @@ only one bump.
 
 | Experiment | What varies | Runs |
 |---|---|---|
-| Baseline | $M\in\{1,2,3,5\}$ × 5 seeds | 20 |
-| Asymmetric prior | $q\in\{0.5,0.7,0.9,0.97\}$ × $M$ × 5 seeds | 80 |
-| Initialisation | default vs "spread" starting means, $q\in\{0.9,0.97\}$, $M\in\{2,3\}$ | 40 |
-| Variance floor | $v_{\min}\in\{10^{-5},\dots,10^{-1}\}$, $q=0.9$ | 25 |
-| Noise robustness | $\sigma\in\{0.05,0.15,0.3,0.5\}$ × $q\in\{0.5,0.9\}$ × $M\in\{1,3\}$ | 80 |
-| MSE networks | $q\in\{0.5,0.9\}$ | 2 |
+| Baseline | $M\in\lbrace 1,2,3,5\rbrace$ × 5 seeds | 20 |
+| Asymmetric prior | $q\in\lbrace 0.5,0.7,0.9,0.97\rbrace$ × $M$ × 5 seeds | 80 |
+| Initialisation | default vs "spread" starting means, $q\in\lbrace 0.9,0.97\rbrace$, $M\in\lbrace 2,3\rbrace$ | 40 |
+| Variance floor | $v_{\min}\in\lbrace 10^{-5},\dots,10^{-1}\rbrace$, $q=0.9$ | 25 |
+| Noise robustness | $\sigma\in\lbrace 0.05,0.15,0.3,0.5\rbrace$ × $q\in\lbrace 0.5,0.9\rbrace$ × $M\in\lbrace 1,3\rbrace$ | 80 |
+| MSE networks | $q\in\lbrace 0.5,0.9\rbrace$ | 2 |
 
 Overlapping settings are trained once and reused. The dataset is fixed by `data_seed`, so only the
 initialisation seed varies and the spread across seeds isolates optimisation randomness.
@@ -205,6 +217,7 @@ Gaussian mixture can't express: hard support edges, the prior's discontinuity at
 peaks. Truncated mixtures or normalising flows would be natural next steps.
 
 **Limitations.**
+
 * We used one dataset size (10k) and one network size. With much less data, or more extreme
   imbalance, the rare branch could well be missed. We did not test this.
 * The capture ≥ 0.5 threshold for "recovered" is our own, fairly lenient definition, so the raw
@@ -227,6 +240,7 @@ peaks. Truncated mixtures or normalising flows would be natural next steps.
 | `src/p8/data.py`, `config.py` | Data generator, seeding, all settings |
 | `tools/build_notebook.py` | Generates the notebook (edit cells here) |
 | `tests/sanity_check.py` | Standalone checks of the reference and the MDN |
+| `TASK_SPLIT.md` | Who does which part of the project |
 | `figures/` | All figures |
 | `artifacts/results/` | CSV result tables + `settings.json` |
 
@@ -247,8 +261,9 @@ peaks. Truncated mixtures or normalising flows would be natural next steps.
 
 ```bash
 python -m venv .venv
-.venv\Scripts\activate          # Windows   (macOS/Linux: source .venv/bin/activate)
-pip install torch --index-url https://download.pytorch.org/whl/cu126   # GPU; plain `pip install torch` for CPU
+source .venv/bin/activate        # macOS / Linux
+# .venv\Scripts\activate         # Windows
+pip install torch --index-url https://download.pytorch.org/whl/cu126   # NVIDIA GPU; plain `pip install torch` for CPU / Mac
 pip install -r requirements.txt
 python -m ipykernel install --user --name scaf-project8
 jupyter nbconvert --to notebook --execute --inplace --ExecutePreprocessor.timeout=-1 Project8_Inverse_Problems.ipynb
