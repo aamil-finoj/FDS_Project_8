@@ -41,7 +41,7 @@ Each person only needs the one-line "given" from the person before them; nothing
 * **Ashwath:** Bayes' rule for p(t \| x); why Z(x) has no closed form and how the quadrature is stabilised; the four input regions and where the modes are (t = 0 and ±√x); the checks (integrates to 1, symmetric, tolerance-independent).
 * **Joel:** the identity E[(f − t)²] = E[(f − E[t\|x])²] + E[Var(t\|x)], so the optimum is the conditional mean; why that is 0 for a symmetric prior and 0.8√x for q = 0.9; why equal MSE for every model (about 1.339 vs 0.473 at q = 0.9) hides large differences in NLL.
 * **Arnav:** the mixture formula, softmax weights, softplus variances plus floor v_min; training setup; logsumexp vs the naive sum (−∞ vs −3105 at t = 30); why a floor wider than the true branch (v_min = 0.1) breaks recovery.
-* **Aamil:** excess NLL as a KL estimate; the head-to-head table (excess NLL 1.68 vs 0.03, W1 0.45 vs 0.04); the densities at chosen x; the forward-residual test (sd 2.63 vs 0.16, target 0.15) and why the target is σ, not 0.
+* **Aamil:** excess NLL as a KL estimate and why its *paired* standard error is the right uncertainty; choosing M on validation NLL (any M ≥ 2 ties, M = 3 kept); the head-to-head table (excess NLL 1.68 vs 0.03, W1 0.45 vs 0.04, 5-seed means); the densities at chosen x and where the MDN's error really sits (beyond the support, not the merged dip); calibration via the PIT (KS 0.24 vs 0.013); the forward-residual test (94% vs 35% within ±2σ, target 95%) and why the target is σ, not 0.
 * **Rohan:** the asymmetric prior and why P(t > 0 \| x) = q exactly; branch-probability error and capture/recovery (mass, not component counts); results (60/60 recovered for M ≥ 2, M = 1 never); initialisation doesn't matter.
 * **Advay:** noise sweep σ = 0.05 to 0.5; why excess NLL is worst at the smallest noise (branches get very sharp); why the single Gaussian looks "better" at high noise; the prior's jump at 0 and mixture limits.
 
@@ -86,6 +86,6 @@ Mention results in your segment only if they are finished and checked.
 | Ashwath | Make the quadrature for Z(x) faster or vectorised without losing accuracy (check against the 400 001-point grid) |
 | Joel | Add an absolute-loss (median) network next to the MSE network, to show it also lands off the branches. **Done: notebook §4.1** (result: off the branches for q = 0.5, on the majority branch for q = 0.9, never both) |
 | Arnav | Try truncated mixtures to remove the about 0.7% of mass that leaks outside [−a, a] |
-| Aamil | Choose M by held-out NLL across M ∈ {1, 2, 3, 5} and justify the pick |
+| Aamil | Choose M by held-out NLL across M ∈ {1, 2, 3, 5} and justify the pick. **Done: notebook §6.1** (chosen on validation NLL; any M ≥ 2 ties, M = 3 kept), plus §6.3 region breakdown and §6.4 PIT calibration |
 | Rohan | Test smaller training sets and more extreme imbalance (the README lists this as untested) |
 | Advay | Look at the prior's jump at t = 0 at high noise, which a smooth mixture can only approximate |

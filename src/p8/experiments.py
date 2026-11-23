@@ -12,7 +12,7 @@ import pandas as pd
 
 from .config import DataConfig, MDNConfig, TrainConfig
 from .data import make_splits
-from .evaluate import recovery_x_grid, summarise_mdn
+from .evaluate import paired_excess_nll, recovery_x_grid, summarise_mdn
 from .reference import reference_density_grid, reference_log_density
 from .training import train_mdn
 
@@ -29,6 +29,7 @@ class DataContext:
     ref_eval: np.ndarray
     ref_rec: np.ndarray
     ref_nll: float
+    ref_lp: np.ndarray        # per-test-point exact log p(t_i | x_i), for paired comparisons
 
 
 @lru_cache(maxsize=None)
@@ -39,11 +40,12 @@ def get_context(dcfg: DataConfig) -> DataContext:
     x_te, t_te = splits["test"]
     x_eval = x_te[:N_EVAL]
     x_rec = recovery_x_grid(dcfg.sigma, dcfg.a)
+    ref_lp = reference_log_density(t_te, x_te, dcfg.a, dcfg.sigma, dcfg.q)
     return DataContext(
         dcfg=dcfg, splits=splits, x_eval=x_eval, x_rec=x_rec,
         ref_eval=reference_density_grid(x_eval, T_GRID, dcfg.a, dcfg.sigma, dcfg.q),
         ref_rec=reference_density_grid(x_rec, T_GRID, dcfg.a, dcfg.sigma, dcfg.q),
-        ref_nll=float(-reference_log_density(t_te, x_te, dcfg.a, dcfg.sigma, dcfg.q).mean()),
+        ref_nll=float(-ref_lp.mean()), ref_lp=ref_lp,
     )
 
 
@@ -53,8 +55,11 @@ def run_mdn_setting(dcfg: DataConfig, tcfg: TrainConfig, mcfg: MDNConfig, seed: 
     model, hist, _ = train_mdn(dcfg, tcfg, mcfg, seed=seed, splits=ctx.splits, use_cache=use_cache)
     row = summarise_mdn(model, dcfg, ctx.splits, T_GRID, ctx.x_eval, ctx.x_rec,
                         ref_eval=ctx.ref_eval, ref_rec=ctx.ref_rec, ref_nll=ctx.ref_nll)
+    _, excess_se = paired_excess_nll(model, *ctx.splits["test"], ctx.ref_lp)
     row.update(q=dcfg.q, sigma=dcfg.sigma, M=mcfg.M, var_floor=mcfg.var_floor, mu_init=mcfg.mu_init,
-               seed=seed, best_epoch=hist["best_epoch"], epochs_run=hist["epochs_run"])
+               seed=seed, best_epoch=hist["best_epoch"], epochs_run=hist["epochs_run"],
+               val_nll=hist["best_val"],          # validation NLL of the restored checkpoint (for model choice)
+               excess_nll_se=excess_se)           # paired standard error of excess_nll on the test set
     return model, hist, row
 
 

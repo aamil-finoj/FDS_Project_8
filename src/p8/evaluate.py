@@ -52,10 +52,48 @@ def mixture_mean(model, x):
 
 
 @torch.no_grad()
+def log_prob_points(model, x, t):
+    """Per-point log p_theta(t_i | x_i) as a float64 numpy array."""
+    return model.log_prob(_t(t), _t(x)).cpu().numpy().astype(np.float64)
+
+
 def evaluate_nll(model, x, t):
     """Average held-out NLL (nats) of a probabilistic model, plus its standard error."""
-    lp = model.log_prob(_t(t), _t(x)).cpu().numpy()
+    lp = log_prob_points(model, x, t)
     return float(-lp.mean()), float(lp.std(ddof=1) / np.sqrt(len(lp)))
+
+
+def paired_excess_nll(model, x, t, ref_lp):
+    """Excess NLL = mean_i [log p(t_i|x_i) - log p_theta(t_i|x_i)] and its PAIRED standard error.
+
+    Both models are scored on the same test points, so the per-point differences are used for the
+    standard error. This removes the large point-to-point variation that both NLLs share and gives a
+    much tighter (and the correct) uncertainty for comparing models.
+    """
+    d = np.asarray(ref_lp) - log_prob_points(model, x, t)
+    return float(d.mean()), float(d.std(ddof=1) / np.sqrt(len(d)))
+
+
+def model_cdf(model, x, t):
+    """Predicted CDF F_theta(t_i | x_i) = sum_j pi_j Phi((t_i - mu_j) / sqrt(v_j)) for paired arrays.
+
+    Evaluated at the true t on held-out data this is the probability integral transform (PIT):
+    for a correct conditional model the PIT values are Uniform(0, 1).
+    """
+    pi, mu, var = mdn_params(model, x)
+    t = np.asarray(t, dtype=float)[:, None]
+    return (pi * ndtr((t - mu) / np.sqrt(var))).sum(-1)
+
+
+def truncated_nll(model, x, t, a):
+    """NLL of the model density restricted to the prior support [-a, a] and renormalised.
+
+    log p_trunc = log p_theta - log m(x), with m(x) the model mass inside [-a, a]. This is a diagnostic
+    only (the trained model is unchanged): it shows how much likelihood the leaked mass costs.
+    """
+    x = np.asarray(x, dtype=float)
+    inside = model_mass_in_interval(model, x, np.full(len(x), -a), np.full(len(x), a))
+    return float(-(log_prob_points(model, x, t) - np.log(inside)).mean())
 
 
 def sample_conditional(model, x, n_samples, seed=0):
