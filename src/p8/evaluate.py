@@ -105,7 +105,8 @@ def model_branch_probability(model, x):
 def out_of_support_mass(model, x, a):
     """Predicted mass outside the prior support [-a, a] (should be ~0 for a good model)."""
     x = np.atleast_1d(x)
-    return 1.0 - model_mass_in_interval(model, x, np.full(len(x), -a), np.full(len(x), a))
+    raw = 1.0 - model_mass_in_interval(model, x, np.full(len(x), -a), np.full(len(x), a))
+    return np.maximum(0.0, raw)
 
 
 def branch_neighbourhoods(x, sigma, a, k=3.0):
