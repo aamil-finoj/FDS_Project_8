@@ -19,7 +19,9 @@ import torch
 
 from .config import CODE_VERSION, DataConfig, MDNConfig, TrainConfig
 from .data import make_splits, set_seed
-from .models import MDN, MSENet, mdn_nll_loss, mse_loss
+from .models import MDN, MSENet, mae_loss, mdn_nll_loss, mse_loss
+
+LOSSES = {"mse": mse_loss, "mae": mae_loss, "mdn": mdn_nll_loss}
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 CACHE_DIR = Path("artifacts/cache")
@@ -76,7 +78,7 @@ def fit(model, loss_fn, train, val, tcfg: TrainConfig, seed: int):
 # ----------------------------------------------------------------------------- builders
 def build_model(kind: str, train, tcfg: TrainConfig, mcfg: MDNConfig | None = None, a=2.0):
     x_mean, x_std = float(np.mean(train[0])), float(np.std(train[0]))
-    if kind == "mse":
+    if kind in ("mse", "mae"):  # same point-predictor architecture, different loss
         return MSENet(x_mean, x_std, tcfg.hidden, tcfg.n_layers)
     return MDN(x_mean, x_std, M=mcfg.M, hidden=tcfg.hidden, n_layers=tcfg.n_layers,
                var_floor=mcfg.var_floor, mu_init=mcfg.mu_init, a=a, truncate=mcfg.truncate)
@@ -91,7 +93,7 @@ def _run_key(kind, dcfg, tcfg, mcfg, seed):
 
 def train_run(kind: str, dcfg: DataConfig, tcfg: TrainConfig, mcfg: MDNConfig | None = None,
               seed: int = 0, splits=None, use_cache=True, verbose=False):
-    """Train one model ('mse' or 'mdn'; single Gaussian = 'mdn' with M=1) and cache it.
+    """Train one model ('mse', 'mae' or 'mdn'; single Gaussian = 'mdn' with M=1) and cache it.
 
     The cache key hashes every setting (+ CODE_VERSION), so a cached result is reused
     only for an identical configuration. Returns (model, history, settings_dict).
@@ -106,7 +108,7 @@ def train_run(kind: str, dcfg: DataConfig, tcfg: TrainConfig, mcfg: MDNConfig | 
         model.load_state_dict(blob["state_dict"])
         model.to(DEVICE).eval()
         return model, blob["history"], payload
-    loss_fn = mse_loss if kind == "mse" else mdn_nll_loss
+    loss_fn = LOSSES[kind]
     model, hist = fit(model, loss_fn, splits["train"], splits["val"], tcfg, seed)
     if verbose:
         print(f"[{kind}] seed={seed} best val={hist['best_val']:.4f} @ epoch {hist['best_epoch']}"
@@ -118,6 +120,11 @@ def train_run(kind: str, dcfg: DataConfig, tcfg: TrainConfig, mcfg: MDNConfig | 
 
 def train_mse_model(dcfg, tcfg, seed=0, **kw):
     return train_run("mse", dcfg, tcfg, None, seed, **kw)
+
+
+def train_mae_model(dcfg, tcfg, seed=0, **kw):
+    """Point predictor trained with absolute error: estimates the conditional median."""
+    return train_run("mae", dcfg, tcfg, None, seed, **kw)
 
 
 def train_single_gaussian_model(dcfg, tcfg, var_floor=1e-4, seed=0, **kw):

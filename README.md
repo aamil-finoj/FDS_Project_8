@@ -71,16 +71,17 @@ By Bayes' rule, after the constants cancel,
 $$p(t\mid x)=\frac{\exp\big[-\tfrac{(x-t^2)^2}{2\sigma^2}\big]}{Z(x)}\,\mathbb 1_{[-a,a]}(t),\qquad
 Z(x)=\int_{-a}^{a}e^{-(x-u^2)^2/2\sigma^2}\,du .$$
 
-$Z(x)$ has no closed form, so it is computed with `scipy.integrate.quad`. To keep this stable we
+$Z(x)$ has no elementary closed form, so it is computed with `scipy.integrate.quad`. To keep this stable we
 subtract the maximum of the log integrand, split the integral at 0, and give `quad` the peak
 locations as break points. Checks: the density integrates to 1, it is symmetric, and the results
-don't change with tolerance or a 400 001-point grid.
+don't change with tolerance or a 400 001-point grid. The notebook runs these for the symmetric prior;
+`tests/test_reference.py` repeats them for $q=0.9$ and for edge cases.
 
 ### Where the solutions are
 $\partial_t\log p = 2t(x-t^2)/\sigma^2$, so the stationary points are $t=0$ and $t=\pm\sqrt x$. For
-$x>0$, $t=0$ is a local *minimum* (curvature $2x/\sigma^2>0$), and each branch has local standard
-deviation $\sigma/(2\sqrt x)$. The ratio of the valley to the peaks is $e^{-x^2/2\sigma^2}$, which
-gives four input regions:
+$x>0$, $t=0$ is a local *minimum* of $\log p$ (curvature $2x/\sigma^2>0$), and each branch has local
+standard deviation $\sigma/(2\sqrt x)$. For $0<x\le a^2$ the ratio of the valley to the peaks is
+$e^{-x^2/2\sigma^2}$ (beyond $a^2$ the peaks sit at $\pm a$ instead), which gives four input regions:
 
 | Region | $x$ | Posterior shape |
 |---|---|---|
@@ -118,6 +119,13 @@ the optimum is the **conditional mean** $\mathbb E[t\mid x]$:
 Our network reached the Bayes-optimal MSE (1.3388 against 1.3386 for the exact conditional mean). It
 is a perfect estimator of a summary that is useless for this problem.
 
+**Extra: absolute-error (MAE) network (notebook §4.1).** The same network trained with $|f-t|$ learns
+the conditional **median**. With $q=0.9$ that lands on the majority branch: a valid answer, but only one
+of the two. With the symmetric prior the median is 0, but the loss is almost flat across the whole gap, so
+the trained networks wander inside it and partly drift onto the $+$ branch (following a 50.8% sign
+imbalance in the training sample). Changing the point loss changes *which* single answer you get, never
+the fact that there is only one.
+
 ### (b) Mixture density network, MDN (Part 3)
 
 $$p_\theta(t\mid x)=\sum_{j=1}^{M}\pi_j(x)\,\mathcal N\big(t\mid\mu_j(x),v_j(x)\big),\qquad
@@ -135,7 +143,7 @@ $t=30$, while logsumexp gives −3105.
 This is literally the MDN with $M=1$: the same code, a different $M$. It models uncertainty, but with
 only one bump.
 
-### Experiments (~180 networks)
+### Experiments (~190 networks)
 
 | Experiment | What varies | Runs |
 |---|---|---|
@@ -145,6 +153,7 @@ only one bump.
 | Variance floor | $v_{\min}\in\lbrace 10^{-5},\dots,10^{-1}\rbrace$, $q=0.9$ | 25 |
 | Noise robustness | $\sigma\in\lbrace 0.05,0.15,0.3,0.5\rbrace$ × $q\in\lbrace 0.5,0.9\rbrace$ × $M\in\lbrace 1,3\rbrace$ | 80 |
 | MSE networks | $q\in\lbrace 0.5,0.9\rbrace$ | 2 |
+| MAE (median) networks, §4.1 | $q\in\lbrace 0.5,0.9\rbrace$ × 5 seeds | 10 |
 
 Overlapping settings are trained once and reused. The dataset is fixed by `data_seed`, so only the
 initialisation seed varies and the spread across seeds isolates optimisation randomness.
@@ -172,14 +181,20 @@ eliminates out-of-support leakage (`0.000`) and cuts baseline excess NLL from ~0
 
 ### Baseline (symmetric prior, σ = 0.15)
 
-| Model | Excess NLL | W1 | Residual sd (target 0.15) | Test MSE |
-|---|---|---|---|---|
-| MSE network | n/a | n/a | 1.20 | 1.339 |
-| Single Gaussian ($M=1$) | 1.68 | 0.45 | 2.63 | 1.339 |
-| **MDN ($M=3$)** | **0.03** | **0.04** | **0.16** | 1.338 |
-| Exact posterior | 0 | 0 | 0.15 | 1.339 |
+| Model | Excess NLL¹ | W1¹ | Residuals within ±2σ² (target ≈ 0.95) | PIT KS distance² (0 = calibrated) | Test MSE |
+|---|---|---|---|---|---|
+| MSE network | n/a | n/a | 0.26 | n/a | 1.339 |
+| Single Gaussian ($M=1$) | 1.68 | 0.45 | 0.35 | 0.24 | 1.339 |
+| **MDN ($M=3$)** | **0.03** | **0.04** | **0.94** | **0.013** | 1.338 |
+| Exact posterior | 0 | 0 | 0.96 | 0.012 | 1.339 |
+
+¹ mean over 5 seeds. ² seed-0 model, held-out test set (20 posterior samples per observation for the residuals).
 
 All models have essentially the same MSE, but only the MDN has the right distribution.
+On **validation** NLL any $M\ge2$ is as good as any other ($M=2,3,5$ within one seed-sd), so $M=3$ is a
+safe choice, not a tuned optimum. Split by input region, about a quarter of the MDN's small excess NLL
+comes from the 1% of test points beyond the support ($x>a^2$), where a Gaussian mixture cannot draw the
+hard edge at $\pm a$.
 Branch probability is about 0.5 for **both** probabilistic models, so a correct sign split does not
 imply a correct density.
 
@@ -242,6 +257,7 @@ peaks. Truncated mixtures or normalising flows would be natural next steps.
 | `src/p8/data.py`, `config.py` | Data generator, seeding, all settings |
 | `tools/build_notebook.py` | Generates the notebook (edit cells here) |
 | `tests/sanity_check.py` | Standalone checks of the reference and the MDN |
+| `tests/test_reference.py` | Fast standalone tests of the exact posterior (Part 1): numpy and scipy only, runs in seconds |
 | `TASK_SPLIT.md` | Who does which part of the project |
 | `figures/` | All figures |
 | `artifacts/results/` | CSV result tables + `settings.json` |

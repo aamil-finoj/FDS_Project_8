@@ -17,6 +17,10 @@ for x in [-0.4, 0.05, 1.0, 3.9, 4.6]:
         print(f"x={x:5} q={q} int={np.trapezoid(d, grid):.6f} P+={reference_branch_probability(x,a,s,q):.6f} "
               f"E[t|x]={reference_mean(x,a,s,q):+.5f} gridvsquad={np.abs(reference_density_grid([x],grid,a,s,q)[0]-d).max():.2e}")
 print("symmetry max |p(t)-p(-t)|:", np.abs(reference_density(grid,1.0,a,s)-reference_density(-grid,1.0,a,s)).max())
+for q in [0.5, 0.9]:  # conditional median (what an absolute-error network estimates): 0 if symmetric, on the + branch if q = 0.9
+    for x in [1.0, 3.0]:
+        med = reference_median(x, a, s, q)
+        print(f"median x={x} q={q}: {med:+.4f}  F(median)={reference_cdf(med, x, a, s, q):.6f}  band={reference_median_band(x, a, s, q)}")
 print("device", DEVICE)
 d = DataConfig(); tc = TrainConfig(max_epochs=60)
 sp = make_splits(d)

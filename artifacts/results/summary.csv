@@ -2,7 +2,9 @@ part,quantity,value (mean ± sd over seeds)
 Part 4,"baseline excess NLL, single Gaussian (M=1)",1.678 ± 0.000
 Part 4,"baseline excess NLL, MDN (M=3)",0.030 ± 0.007
 Part 4,"baseline W1, single Gaussian / MDN M=3",0.448 ± 0.000 / 0.040 ± 0.022
-Part 4,"residual sd (true t / MDN / single Gauss. / MSE), sigma = 0.15",0.151 / 0.161 / 2.626 / 1.198
+Part 4,fraction of residuals within 2 sigma (true t / MDN / single Gauss. / MSE),0.951 / 0.944 / 0.347 / 0.259
+Part 4,"residual sd (true t / MDN / single Gauss. / MSE), sigma = 0.15",0.151 / 0.156 / 2.472 / 1.198
+Part 4,"PIT KS distance, seed 0 (exact / single Gauss. / MDN)",0.012 / 0.236 / 0.013
 Part 5,q = 0.5: MDN M=3 minority capture / recovery rate,0.995 ± 0.045 / 1.000 ± 0.000
 Part 5,q = 0.7: MDN M=3 minority capture / recovery rate,0.980 ± 0.024 / 1.000 ± 0.000
 Part 5,q = 0.9: MDN M=3 minority capture / recovery rate,0.917 ± 0.069 / 1.000 ± 0.000
