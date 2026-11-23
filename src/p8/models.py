@@ -1,6 +1,7 @@
 """PyTorch models.
 
-* MSENet           : x -> single point prediction t_hat (trained with squared error)
+* MSENet           : x -> single point prediction t_hat (trained with squared error;
+                     the same architecture trained with absolute error is the "MAE network")
 * MDN(M)           : x -> (log pi, mu, v) of an M-component Gaussian mixture over t
 * single Gaussian  : simply MDN(M=1) -> N(mu(x), v(x)), trained with Gaussian NLL
 
@@ -105,3 +106,8 @@ def mdn_nll_loss(model: MDN, x, t):
 
 def mse_loss(model: MSENet, x, t):
     return F.mse_loss(model(x), t)
+
+
+def mae_loss(model: MSENet, x, t):
+    """Mean absolute error. Its population minimiser is the conditional MEDIAN of t given x."""
+    return F.l1_loss(model(x), t)

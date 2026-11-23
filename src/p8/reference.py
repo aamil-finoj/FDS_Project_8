@@ -102,6 +102,54 @@ def reference_mean(x, a, sigma, q=0.5):
     return num / np.exp(log_normalizing_constant(x, a, sigma, q) - m)
 
 
+def reference_cdf(c, x, a, sigma, q=0.5):
+    """P(t <= c | x) by quadrature (same stabilised integrand as log_normalizing_constant)."""
+    m = max_log_likelihood(x, a, sigma)
+    peak = float(np.sqrt(np.clip(x, 0.0, a**2)))
+    f = lambda u: np.exp(-((x - u * u) ** 2) / (2.0 * sigma**2) - m)
+    c = float(np.clip(c, -a, a))
+    kw = dict(epsabs=1e-12, epsrel=1e-10, limit=200)
+    # mass on [-a, min(c, 0)] (weight 2(1-q)) and on [0, c] if c > 0 (weight 2q), with peaks as break points
+    lo_end = min(c, 0.0)
+    pts = [p for p in (-peak,) if -a < p < lo_end] or None
+    neg, _ = integrate.quad(f, -a, lo_end, points=pts, **kw) if lo_end > -a else (0.0, 0.0)
+    pos = 0.0
+    if c > 0:
+        pts = [p for p in (peak,) if 0.0 < p < c] or None
+        pos, _ = integrate.quad(f, 0.0, c, points=pts, **kw)
+    num = 2.0 * (1.0 - q) * neg + 2.0 * q * pos
+    return num / np.exp(log_normalizing_constant(x, a, sigma, q) - m)
+
+
+def reference_quantile(p, x, a, sigma, q=0.5):
+    """p-quantile of p(t | x): the c with P(t <= c | x) = p, found by root finding on the CDF."""
+    from scipy.optimize import brentq
+    return brentq(lambda c: reference_cdf(c, x, a, sigma, q) - p, -a, a, xtol=1e-10)
+
+
+def reference_median_band(x, a, sigma, q=0.5, delta=1e-3):
+    """Interval [Q(0.5 - delta), Q(0.5 + delta)] around the conditional median.
+
+    Moving a prediction f anywhere inside this band changes the expected absolute error
+    E|f - t| by at most 2*delta*|band width|, because d/df E|f - t| = 2 P(t <= f | x) - 1.
+    With two branches and a symmetric prior the CDF is flat at 0.5 across the whole gap,
+    so the band spans (almost) the gap: absolute loss barely cares where in the gap f sits.
+    """
+    return reference_quantile(0.5 - delta, x, a, sigma, q), reference_quantile(0.5 + delta, x, a, sigma, q)
+
+
+def reference_median(x, a, sigma, q=0.5):
+    """Conditional median of t given x - the population quantity an absolute-error (MAE) network estimates.
+
+    Taken as the midpoint of a vanishingly narrow median band (delta = 1e-9). This matters
+    when the CDF is flat at 0.5 over the gap between the branches (density ~ 0 there): a plain
+    root finder would return an arbitrary point in the gap, while the midpoint gives the
+    exact answer 0 for the symmetric prior and the usual unique median otherwise.
+    """
+    lo, hi = reference_median_band(x, a, sigma, q, delta=1e-9)
+    return 0.5 * (lo + hi)
+
+
 def reference_modes(x, a, sigma):
     """Analytic mode locations of p(t | x) (any q - the prior only rescales each half).
 
