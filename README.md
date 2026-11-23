@@ -240,6 +240,7 @@ peaks. Truncated mixtures or normalising flows would be natural next steps.
 | `src/p8/data.py`, `config.py` | Data generator, seeding, all settings |
 | `tools/build_notebook.py` | Generates the notebook (edit cells here) |
 | `tests/sanity_check.py` | Standalone checks of the reference and the MDN |
+| `tests/test_reference.py` | Fast standalone tests of the exact posterior (Part 1): numpy and scipy only, runs in seconds |
 | `TASK_SPLIT.md` | Who does which part of the project |
 | `figures/` | All figures |
 | `artifacts/results/` | CSV result tables + `settings.json` |
