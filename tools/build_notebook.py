@@ -508,7 +508,7 @@ md(r"""
 **Results of §4.1.**
 * **$q=0.5$:** the MAE networks never show both branches, and they are not even stable. Each seed
   settles somewhere different inside the median band, and part of each curve drifts up onto the $+$
-  branch (in our run, 21–46% of the two-branch region counts as "near +", the rest "between"). The upward
+  branch (in our run, 21–34% of the two-branch region counts as "near +", the rest "between"). The upward
   pull comes from the training sample, which happens to contain 50.8% positive $t$. With a flat loss, a
   tiny sampling imbalance decides where the prediction goes. Even so, their test MAE (about 1.02) is
   within 2% of the exact median's (1.003), while their test MSE is much worse (about 2.3 vs 1.34). A small
