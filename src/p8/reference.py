@@ -4,8 +4,16 @@ Posterior up to a constant:  log p~(t | x) = -(x - t^2)^2 / (2 sigma^2) + log pr
 For the asymmetric prior we write prior(t) = w(t) / (2a) with w = 2q (t >= 0) or 2(1-q) (t < 0);
 the constant 1/(2a) and the Gaussian constant cancel in the normalisation.
 """
+from functools import lru_cache
+
 import numpy as np
 from scipy import integrate
+
+
+def _validate(a, sigma, q):
+    """Reject parameters for which the posterior is not defined (NaN also fails these tests)."""
+    if not (a > 0 and sigma > 0 and 0.0 <= q <= 1.0):
+        raise ValueError(f"need a > 0, sigma > 0 and 0 <= q <= 1; got a={a}, sigma={sigma}, q={q}")
 
 
 def _prior_weight(t, q):
@@ -15,9 +23,14 @@ def _prior_weight(t, q):
 
 
 def log_unnormalized_posterior(t, x, a, sigma, q=0.5):
-    """log p~(t | x) = -(x - t^2)^2 / (2 sigma^2) + log w(t) on [-a, a]; -inf outside."""
+    """log p~(t | x) = -(x - t^2)^2 / (2 sigma^2) + log w(t) on [-a, a]; -inf outside.
+
+    With q = 0 or 1 one side has prior weight 0, so its log density is -inf (not a warning).
+    """
+    _validate(a, sigma, q)
     t = np.asarray(t, dtype=float)
-    val = -((x - t**2) ** 2) / (2.0 * sigma**2) + np.log(_prior_weight(t, q))
+    with np.errstate(divide="ignore"):
+        val = -((x - t**2) ** 2) / (2.0 * sigma**2) + np.log(_prior_weight(t, q))
     return np.where(np.abs(t) <= a, val, -np.inf)
 
 
@@ -31,25 +44,47 @@ def max_log_likelihood(x, a, sigma):
     return -((x - t2) ** 2) / (2.0 * sigma**2)
 
 
-def log_normalizing_constant(x, a, sigma, q=0.5, epsabs=1e-12, epsrel=1e-10):
-    """log Z(x), Z(x) = int_{-a}^{a} exp(log p~(u | x)) du, by scipy.integrate.quad.
+def _half_integral(x, a, sigma, side, power, m, epsabs=1e-12, epsrel=1e-10):
+    """int over [0, a] (side=+1) or [-a, 0] (side=-1) of u**power * exp(-(x-u^2)^2/(2 sigma^2) - m) du.
 
-    We integrate each half [-a, 0] and [0, a] separately (the prior weight jumps at 0)
-    and tell quad where the peak sits (u = sqrt(clip(x, 0, a^2))) so it never misses
-    a narrow mode. Values are scaled by exp(-max log-likelihood) for stability.
+    The prior weight jumps at 0, so each half is integrated on its own. quad is told where the peak
+    (u = side * sqrt(clip(x, 0, a^2))) sits so it cannot miss a narrow mode. m = max_log_likelihood
+    keeps the integrand at most 1, so nothing under- or overflows.
     """
-    m = max_log_likelihood(x, a, sigma)
     peak = float(np.sqrt(np.clip(x, 0.0, a**2)))
+    pts = [side * peak] if 0.0 < peak < a else None
+    lo, hi = (0.0, a) if side > 0 else (-a, 0.0)
 
     def f(u):
-        return np.exp(-((x - u * u) ** 2) / (2.0 * sigma**2) - m)
+        return u**power * np.exp(-((x - u * u) ** 2) / (2.0 * sigma**2) - m)
 
-    pts_pos = [peak] if 0.0 < peak < a else None
-    pts_neg = [-peak] if 0.0 < peak < a else None
-    half_pos, _ = integrate.quad(f, 0.0, a, points=pts_pos, epsabs=epsabs, epsrel=epsrel, limit=200)
-    half_neg, _ = integrate.quad(f, -a, 0.0, points=pts_neg, epsabs=epsabs, epsrel=epsrel, limit=200)
-    z_scaled = 2.0 * q * half_pos + 2.0 * (1.0 - q) * half_neg
-    return np.log(z_scaled) + m
+    value, _ = integrate.quad(f, lo, hi, points=pts, epsabs=epsabs, epsrel=epsrel, limit=200)
+    return value
+
+
+@lru_cache(maxsize=200_000)
+def _halves(x, a, sigma, epsabs, epsrel):
+    """Cached (m, int_0^a f, int_-a^0 f) with f = exp(-(x-u^2)^2/(2 sigma^2) - m).
+
+    These do not depend on q (the prior only multiplies each half by a weight), so every q, and every
+    function that needs Z(x) or P(t > 0 | x), reuses the same two integrals for a given x.
+    """
+    m = float(max_log_likelihood(x, a, sigma))
+    return (m,
+            _half_integral(x, a, sigma, +1, 0, m, epsabs, epsrel),
+            _half_integral(x, a, sigma, -1, 0, m, epsabs, epsrel))
+
+
+def log_normalizing_constant(x, a, sigma, q=0.5, epsabs=1e-12, epsrel=1e-10):
+    """log Z(x), Z(x) = int_{-a}^{a} exp(log p~(u | x)) du, by scipy.integrate.quad (scalar x).
+
+    We integrate each half [-a, 0] and [0, a] separately (the prior weight jumps at 0)
+    and tell quad where the peak sits so it never misses a narrow mode. Values are scaled by
+    exp(-max log-likelihood) for stability. The two half-integrals are cached per x.
+    """
+    _validate(a, sigma, q)
+    m, pos, neg = _halves(float(x), float(a), float(sigma), float(epsabs), float(epsrel))
+    return float(np.log(2.0 * q * pos + 2.0 * (1.0 - q) * neg) + m)
 
 
 def reference_density(t, x, a, sigma, q=0.5):
@@ -80,25 +115,22 @@ def reference_density_grid(x_values, t_grid, a, sigma, q=0.5):
 
 
 def reference_branch_probability(x, a, sigma, q=0.5):
-    """P(t > 0 | x) = int_0^a p(t | x) dt, computed by quadrature (theory says it equals q)."""
-    m = max_log_likelihood(x, a, sigma)
-    peak = float(np.sqrt(np.clip(x, 0.0, a**2)))
-    pts = [peak] if 0.0 < peak < a else None
-    f = lambda u: np.exp(-((x - u * u) ** 2) / (2.0 * sigma**2) - m)
-    half_pos, _ = integrate.quad(f, 0.0, a, points=pts, epsabs=1e-12, epsrel=1e-10, limit=200)
-    pos = 2.0 * q * half_pos
-    return pos / np.exp(log_normalizing_constant(x, a, sigma, q) - m)
+    """P(t > 0 | x) = int_0^a p(t | x) dt, computed by quadrature (theory says it equals q).
+
+    Both halves are integrated numerically (not by assuming the symmetry that makes the answer q),
+    so this is a genuine check of the quadrature rather than a restatement of the theory.
+    """
+    _validate(a, sigma, q)
+    _, pos, neg = _halves(float(x), float(a), float(sigma), 1e-12, 1e-10)
+    return 2.0 * q * pos / (2.0 * q * pos + 2.0 * (1.0 - q) * neg)
 
 
 def reference_mean(x, a, sigma, q=0.5):
     """E[t | x] by quadrature - the population quantity the MSE network estimates."""
+    _validate(a, sigma, q)
     m = max_log_likelihood(x, a, sigma)
-    peak = float(np.sqrt(np.clip(x, 0.0, a**2)))
-    pts = [peak] if 0.0 < peak < a else None
-    f = lambda u: u * np.exp(-((x - u * u) ** 2) / (2.0 * sigma**2) - m)
-    pos, _ = integrate.quad(f, 0.0, a, points=pts, epsabs=1e-12, epsrel=1e-10, limit=200)
-    neg, _ = integrate.quad(f, -a, 0.0, points=[-peak] if pts else None, epsabs=1e-12, epsrel=1e-10, limit=200)
-    num = 2.0 * q * pos + 2.0 * (1.0 - q) * neg
+    num = (2.0 * q * _half_integral(x, a, sigma, +1, 1, m)
+           + 2.0 * (1.0 - q) * _half_integral(x, a, sigma, -1, 1, m))
     return num / np.exp(log_normalizing_constant(x, a, sigma, q) - m)
 
 
@@ -116,13 +148,21 @@ def reference_modes(x, a, sigma):
     return np.array([-r, r])
 
 
-def dip_ratio(x, sigma):
-    """p(0 | x) / p(+sqrt(x) | x) = exp(-x^2 / (2 sigma^2)) for 0 < x <= a^2 (symmetric prior).
+def dip_ratio(x, sigma, a=None):
+    """p(0 | x) / p(mode | x) for a symmetric prior.
 
+    For 0 < x <= a^2 the modes are at +-sqrt(x), and the ratio is exp(-x^2 / (2 sigma^2)).
     Close to 1 -> the two branches are 'merged' (barely any valley between them);
     close to 0 -> two clearly separated branches.
+    Beyond the support (x > a^2) the modes are pinned to +-a, so the ratio is p(0)/p(a) =
+    exp(-(x^2 - (x - a^2)^2) / (2 sigma^2)); pass `a` to get that case right (without `a` the
+    formula for the in-support case is used, as before).
     """
-    return np.exp(-(x**2) / (2.0 * sigma**2)) if x > 0 else 1.0
+    if x <= 0:
+        return 1.0
+    if a is not None and x > a**2:
+        return float(np.exp(-(x**2 - (x - a**2) ** 2) / (2.0 * sigma**2)))
+    return np.exp(-(x**2) / (2.0 * sigma**2))
 
 
 def classify_region(x, a, sigma, sep_k=2.0):
