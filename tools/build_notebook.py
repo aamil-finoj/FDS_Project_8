@@ -75,7 +75,7 @@ import matplotlib.pyplot as plt
 import scipy
 import torch
 from scipy import integrate
-from scipy.stats import norm
+from scipy.stats import norm, kstest
 
 from p8.config import DataConfig, TrainConfig, MDNConfig, CODE_VERSION
 from p8.data import set_seed, make_splits
@@ -125,7 +125,7 @@ md(r"""
 | Network | 3 hidden layers × 64 units, tanh | Small and easy to explain. The input is 1-D. |
 | Optimiser | Adam, lr $2\times10^{-3}$, batch 256, gradient clipping at norm 5 | Standard and stable. Clipping guards against rare NLL spikes. |
 | Stopping rule | max 400 epochs, early stopping with patience 40 on **validation** loss, best-validation weights restored | The test set is never used for training or tuning. |
-| MDN components | $M=3$ baseline. We also compare $M\in\{1,2,3,5\}$ | Two branches plus one spare component for the merged and boundary regions. Validated in §6. |
+| MDN components | $M=3$ baseline. We also compare $M\in\{1,2,3,5\}$ | Two branches plus one spare component for the merged and boundary regions. Checked against **validation** NLL in §6.1. |
 | Variance floor $v_{\min}$ | $10^{-4}$ (a **variance**, i.e. std floor 0.01) | Below every posterior variance in our regions, the smallest being $(\sigma/2a)^2\approx 1.4\times10^{-3}$ at the boundary for $\sigma=0.15$. It prevents a component from collapsing to zero width. |
 | Seeds | 5 model-initialisation seeds (0–4) | The dataset is held fixed so the spread across seeds isolates initialisation effects. |
 | Imbalance levels $q=P(t>0)$ | 0.5, 0.7, 0.9 (suggested) plus **0.97** (our extra stress test) | 0.97 checks whether a very rare branch gets lost. |
@@ -682,29 +682,78 @@ display(mean_sd_table(df_base, "M", cols))
 """)
 md(r"""
 *(Values are mean ± standard deviation over 5 initialisation seeds; $M=1$ is the single-Gaussian network.)*
+
+### 6.1 Choosing $M$ on validation data, not test data
+$M=3$ was fixed before training (two branches plus one spare component). To check that choice
+without touching the test set, we compare the **validation** NLL of the restored checkpoints. The
+test-set excess NLL is shown only afterwards, with its **paired** standard error: both models are
+scored on the same test points, so the per-point differences give the right uncertainty for a
+comparison. The unpaired error of a raw test NLL (about 0.02) is far too wide for this.
 """)
 code(r"""
-# ---- one representative model of each kind (seed 0) side by side ----
+g = df_base.groupby("M")
+choice = pd.DataFrame({
+    "val NLL (mean)": g.val_nll.mean(), "val NLL (sd over seeds)": g.val_nll.std(),
+    "test excess NLL (mean)": g.excess_nll.mean(), "test excess NLL (sd over seeds)": g.excess_nll.std(),
+    "paired SE per run": g.excess_nll_se.mean()})
+display(choice.round(4))
+best_M = int(choice["val NLL (mean)"].idxmin())
+tied = [int(M) for M in choice.index
+        if choice.loc[M, "val NLL (mean)"] - choice.loc[best_M, "val NLL (mean)"] <= choice["val NLL (sd over seeds)"].max()]
+print(f"lowest validation NLL: M = {best_M};  within one seed-sd of it: M = {tied}")
+""")
+md(r"""
+**Model choice.** The validation NLL drops sharply from $M=1$ to $M=2$ and is essentially flat
+afterwards: the differences between $M=2$, 3 and 5 are about one seed-to-seed standard deviation, and
+the test-set excess NLL agrees (differences of a few thousandths of a nat, within the paired standard
+error). So the data say **"any $M\ge2$"**, not "exactly 3". We keep $M=3$ as the baseline because
+it has the lowest mean validation NLL (by a margin within the seed-to-seed noise), and the spare component gives the model room near the
+merged region and the support boundary (§5.4). Choosing $M=2$ would not change any conclusion.
+""")
+md(r"""
+### 6.2 Head to head: one representative model of each kind
+The table below uses **seed 0** of each model, the same models that appear in every plot of this
+section. The 5-seed means are in the §6 table above, so a seed-0 value (for example the MDN's W1) can
+differ slightly from the 5-seed mean quoted in the summary. Two extra columns:
+* **truncated test NLL:** the NLL after restricting the model density to $[-a,a]$ and renormalising. It shows what the mass leaked outside the support costs. This is a diagnostic only; the trained model is unchanged.
+* **PIT KS distance:** see §6.4.
+""")
+code(r"""
 x_eval = base.x_eval
 mse_model0 = mse_models["q = 0.5"][0]
 ref_mean_test = np.array([R.reference_mean(x, A, SIGMA) for x in x_te])
-rows = [dict(model="MSE network (point)", test_NLL=np.nan, test_MSE_of_point_summary=np.mean((E.predict_point(mse_model0, x_te) - t_te) ** 2),
-             W1=np.nan, branch_err=np.nan, out_of_support_mass=np.nan)]
+pit = {"exact posterior (quadrature)": np.array([R.reference_cdf(t, x, A, SIGMA) for x, t in zip(x_te, t_te)])}
+rows = [dict(model="MSE network (point)", test_NLL=np.nan, excess_NLL=np.nan, excess_NLL_paired_SE=np.nan, truncated_test_NLL=np.nan,
+             test_MSE_of_point_summary=np.mean((E.predict_point(mse_model0, x_te) - t_te) ** 2),
+             W1=np.nan, branch_err=np.nan, out_of_support_mass=np.nan, PIT_KS=np.nan)]
 for name, m in [("single Gaussian (M=1)", sg_model), (f"MDN (M={BASE_MDN.M})", mdn_model)]:
-    rows.append(dict(model=name, test_NLL=E.evaluate_nll(m, x_te, t_te)[0],
+    ex, ex_se = E.paired_excess_nll(m, x_te, t_te, base.ref_lp)
+    pit[name] = E.model_cdf(m, x_te, t_te)
+    rows.append(dict(model=name, test_NLL=E.evaluate_nll(m, x_te, t_te)[0], excess_NLL=ex, excess_NLL_paired_SE=ex_se,
+                     truncated_test_NLL=E.truncated_nll(m, x_te, t_te, A),
                      test_MSE_of_point_summary=np.mean((E.mixture_mean(m, x_te) - t_te) ** 2),
                      W1=E.evaluate_wasserstein(m, x_eval, T_GRID, A, SIGMA, 0.5, ref=base.ref_eval).mean(),
                      branch_err=np.mean(np.abs(E.model_branch_probability(m, x_eval) - 0.5)),
-                     out_of_support_mass=E.out_of_support_mass(m, x_eval, A).mean()))
-rows.append(dict(model="exact posterior (quadrature)", test_NLL=base.ref_nll,
-                 test_MSE_of_point_summary=np.mean((ref_mean_test - t_te) ** 2), W1=0.0, branch_err=0.0, out_of_support_mass=0.0))
-display(pd.DataFrame(rows).set_index("model"))
+                     out_of_support_mass=E.out_of_support_mass(m, x_eval, A).mean(),
+                     PIT_KS=kstest(pit[name], "uniform").statistic))
+rows.append(dict(model="exact posterior (quadrature)", test_NLL=base.ref_nll, excess_NLL=0.0, excess_NLL_paired_SE=0.0,
+                 truncated_test_NLL=base.ref_nll, test_MSE_of_point_summary=np.mean((ref_mean_test - t_te) ** 2),
+                 W1=0.0, branch_err=0.0, out_of_support_mass=0.0,
+                 PIT_KS=kstest(pit["exact posterior (quadrature)"], "uniform").statistic))
+head_to_head = pd.DataFrame(rows).set_index("model")
+head_to_head.to_csv(RESULTS / "part4_head_to_head_seed0.csv")
+display(head_to_head.round(4))
 """)
 md(r"""
 Note the column *test_MSE_of_point_summary*: the MSE network, the single Gaussian (its mean), the MDN
 (its mixture mean) and the exact posterior mean all have **almost the same MSE**. By MSE alone you
 could not tell that the single Gaussian badly misrepresents the posterior. NLL and W1 make the
 difference obvious. We come back to this in §7.4.
+
+The excess NLL's paired standard error is small compared with the gap between the models, so the
+ranking is not a sampling accident. Truncating to the support barely changes the MDN's NLL, so its
+leaked mass costs very little likelihood. The single Gaussian gains much more from truncation,
+because a large share of its single wide bell lies outside $[-2,2]$, but it stays far behind.
 """)
 code(r"""
 # ---- predicted densities vs the reference at selected observations ----
@@ -729,8 +778,34 @@ region ($x=0.1$) the reference has two overlapping bumps with only a shallow dip
 two bump locations right but makes the dip too deep, and the single Gaussian misses the dip entirely.
 Near the upper boundary ($x=3.9$) the reference peaks are sharp and cut off at $\pm2$. The MDN's
 peaks are lower than the reference's, because a Gaussian cannot produce a hard edge, and a little of
-its mass leaks outside $[-2,2]$. These merged and boundary regions are where the MDN's remaining
-errors are concentrated.
+its mass leaks outside $[-2,2]$.
+
+### 6.3 Where are the remaining errors? Excess NLL by input region
+The plots suggest two weak spots for the MDN: the merged region and the support boundary. To check
+whether those visible errors actually cost likelihood, we split the paired excess NLL by input region.
+""")
+code(r"""
+reg_te = np.array([R.classify_region(x, A, SIGMA) for x in x_te])
+REGIONS = ["no real inverse", "merged", "two branches", "beyond support"]
+rows = []
+for name, m in [("single Gaussian (M=1)", sg_model), (f"MDN (M={BASE_MDN.M})", mdn_model)]:
+    d = base.ref_lp - E.log_prob_points(m, x_te, t_te)          # per-point excess NLL
+    for reg in REGIONS:
+        k = reg_te == reg
+        rows.append(dict(model=name, region=reg, n_test_points=int(k.sum()), excess_NLL=d[k].mean(),
+                         paired_SE=d[k].std(ddof=1) / np.sqrt(k.sum()), share_of_total_excess=d[k].sum() / d.sum()))
+by_region = pd.DataFrame(rows)
+by_region.to_csv(RESULTS / "part4_excess_nll_by_region_seed0.csv", index=False)
+display(by_region.set_index(["model", "region"]).round(3))
+""")
+md(r"""
+**Reading the table.** For the MDN, the visibly too-deep dip at $x=0.1$ costs almost nothing: the
+merged region's excess NLL is no worse than the two-branch region's. The dip sits where the reference
+density is already low, so few test points fall there. The real weak spot is **beyond the support**
+($x>a^2$), where the hard edge at $t=\pm2$ cannot be drawn by Gaussians. Its per-point excess NLL is
+more than an order of magnitude larger than anywhere else. Although it holds only about 1% of the test
+points, it accounts for roughly a quarter of the MDN's total excess NLL. For the single Gaussian it is the reverse: almost all of its excess comes from the two-branch
+region, where one bell cannot cover two separated branches.
 """)
 code(r"""
 # ---- branch probabilities P(t > 0 | x) ----
@@ -758,6 +833,35 @@ single bump is centred at 0, so the sign split depends on tiny shifts of the bum
 centred near 0 has $P(t>0)\approx0.5$ almost automatically. This shows again that a correct branch probability does
 **not** imply a correct density: the single Gaussian's sign split is fine while its shape is badly
 wrong. Branch probability must always be read together with NLL, W1 and the density plots.
+
+### 6.4 Calibration: the probability integral transform (PIT)
+A standard check of a conditional density model: evaluate the model's CDF at the **true** $t$ of each
+held-out pair, $u_i = F_\theta(t_i\mid x_i)$. If the model is correct, $u_i \sim \mathrm{Uniform}(0,1)$,
+whatever the shape of the posterior. A U-shaped histogram means the model is overconfident (too
+narrow), a hump means it is too wide, and a slope means it is shifted. We summarise the deviation from
+uniform with the Kolmogorov–Smirnov distance (0 = perfect). For the MDN the CDF is exact:
+$F_\theta(t\mid x)=\sum_j\pi_j\,\Phi\big((t-\mu_j)/\sqrt{v_j}\big)$.
+""")
+code(r"""
+fig, axes = plt.subplots(1, 3, figsize=(15, 3.6), sharey=True)
+for ax, (name, c) in zip(axes, [("exact posterior (quadrature)", COLORS["reference"]), ("single Gaussian (M=1)", COLORS["single"]),
+                                (f"MDN (M={BASE_MDN.M})", COLORS["mdn"])]):
+    ax.hist(pit[name], bins=20, range=(0, 1), density=True, color=c, alpha=0.75)
+    ax.axhline(1, color="k", ls="--", lw=1, label="Uniform(0, 1)")
+    ax.set(title=f"{name}\nKS distance = {kstest(pit[name], 'uniform').statistic:.3f}", xlabel=r"PIT value $F(t_i\mid x_i)$")
+axes[0].set_ylabel("density"); axes[0].legend(fontsize=8)
+fig.suptitle("Calibration on the held-out test set (seed 0)")
+savefig(fig, "06_pit_calibration"); plt.show()
+""")
+md(r"""
+The exact posterior's PIT histogram is flat up to sampling noise, as theory says it must be. This
+benchmark shows how much noise to expect from 2 000 test points. The MDN's histogram is just as flat.
+The single Gaussian's is far from uniform: two sharp spikes near 0.17 and 0.83, and almost nothing
+in between or at the extremes. Its one wide bell is centred between the branches, so a true value on
+the $-$ branch always lands at about the same low quantile of the bell and one on the $+$ branch at
+about the same high quantile. Values near 0.5 would need true $t$ near 0, in the empty gap, where
+the data has almost no mass. This is the same failure the density plots show,
+now measured over the whole test set with a single number.
 """)
 code(r"""
 # ---- samples from the predicted conditionals (one per test x) ----
@@ -786,13 +890,16 @@ A good conditional model should therefore give residuals with standard deviation
 $\sigma=0.15$, not 0. For the MSE network, $r=x-f(x)^2\approx x$ for positive $x$.
 """)
 code(r"""
+N_RES = 20   # posterior samples per test x, so the residual statistics are not one random draw
+x_rep = np.repeat(x_te, N_RES)                                   # x repeated to match the flattened samples
 r_true = x_te - t_te**2
-r_ref  = x_te - E.sample_reference(x_te, T_GRID, A, SIGMA, 0.5, 1, seed=2)[:, 0] ** 2
-r_sg   = x_te - E.sample_conditional(sg_model, x_te, 1, seed=2)[:, 0] ** 2
-r_mdn  = x_te - E.sample_conditional(mdn_model, x_te, 1, seed=2)[:, 0] ** 2
+r_ref  = x_rep - E.sample_reference(x_te, T_GRID, A, SIGMA, 0.5, N_RES, seed=2).ravel() ** 2
+r_sg   = x_rep - E.sample_conditional(sg_model, x_te, N_RES, seed=2).ravel() ** 2
+r_mdn  = x_rep - E.sample_conditional(mdn_model, x_te, N_RES, seed=2).ravel() ** 2
 r_mse  = x_te - E.predict_point(mse_model0, x_te) ** 2
 res = {"true t (= noise eps)": r_true, "exact posterior sample": r_ref, "MDN sample": r_mdn,
        "single-Gaussian sample": r_sg, "MSE point prediction": r_mse}
+res_x = {k: (x_rep if len(r) == len(x_rep) else x_te) for k, r in res.items()}   # matching x for each residual array
 
 fig, axes = plt.subplots(1, 2, figsize=(14, 4))
 bins = np.linspace(-1.5, 4.5, 121)
@@ -808,24 +915,35 @@ axes[1].set(xlabel="r", title="Zoom: residuals vs the noise distribution")
 axes[0].legend(fontsize=8); axes[1].legend(fontsize=8)
 savefig(fig, "06_forward_residuals"); plt.show()
 
-reg_te = np.array([R.classify_region(x, A, SIGMA) for x in x_te])
 rows = []
 for name, r in res.items():
+    reg_r = np.array([R.classify_region(x, A, SIGMA) for x in res_x[name]])
     for reg in ["all", "no real inverse", "merged", "two branches", "beyond support"]:
-        mask = np.ones_like(r, bool) if reg == "all" else reg_te == reg
-        rows.append(dict(source=name, region=reg, n=int(mask.sum()), mean_r=r[mask].mean(), sd_r=r[mask].std(),
-                         frac_within_2sigma=np.mean(np.abs(r[mask]) <= 2 * SIGMA)))
+        mask = np.ones_like(r, bool) if reg == "all" else reg_r == reg
+        rm = r[mask]
+        rows.append(dict(source=name, region=reg, n=int(mask.sum()), mean_r=rm.mean(), sd_r=rm.std(),
+                         robust_sd_r=1.4826 * np.median(np.abs(rm - np.median(rm))),   # MAD-based, insensitive to a few huge residuals
+                         frac_within_2sigma=np.mean(np.abs(rm) <= 2 * SIGMA)))
 resid_table = pd.DataFrame(rows)
-print("mean of r:"); display(resid_table.pivot(index="source", columns="region", values="mean_r").round(3))
-print("standard deviation of r:"); display(resid_table.pivot(index="source", columns="region", values="sd_r").round(3))
-print("fraction of |r| <= 2 sigma:")
+resid_table.to_csv(RESULTS / "part4_forward_residuals.csv", index=False)
+print("fraction of |r| <= 2 sigma (target about 0.95 overall):")
 display(resid_table.pivot(index="source", columns="region", values="frac_within_2sigma").round(3))
+print("mean of r:"); display(resid_table.pivot(index="source", columns="region", values="mean_r").round(3))
+print("standard deviation of r  /  robust (MAD-based) standard deviation of r:")
+display(resid_table.pivot(index="source", columns="region", values="sd_r").round(3))
+display(resid_table.pivot(index="source", columns="region", values="robust_sd_r").round(3))
+print("KS distance of all residuals to N(0, sigma^2), which is their exact distribution under a correct model:")
+display(pd.Series({k: kstest(r, lambda v: norm.cdf(v, 0, SIGMA)).statistic for k, r in res.items()}, name="KS distance").round(3))
 """)
 md(r"""
-**Interpretation.**
-* The true pairs and the exact-posterior samples both have residual standard deviation close to $\sigma$, and about 95% of residuals fall within $\pm2\sigma$, as expected for $\mathcal N(0,\sigma^2)$. This is the benchmark, and it is **not** zero.
-* The MDN samples come close to that benchmark in every region, with a slightly larger spread overall and beyond the support. This is a forward-model consistency check: the sampled inverses explain the observations nearly as well as the true inverses.
-* The single-Gaussian samples have a far wider residual spread in the two-branch region and beyond the support. Many of its samples fall between the branches, or outside $|t|\le2$, where $t^2$ is far from $x$.
+**Interpretation.** We use 20 posterior samples per test observation, so these numbers are not one
+random draw. We lead with the **fraction of residuals within $\pm2\sigma$** and the **KS distance to
+$\mathcal N(0,\sigma^2)$**. The plain standard deviation is dominated by a few extreme residuals: a
+single sample far outside $[-2,2]$ has a huge $t^2$. So we also report a robust, MAD-based standard
+deviation.
+* The true pairs and the exact-posterior samples both have about 95% of residuals within $\pm2\sigma$ and a KS distance near 0, as expected for $\mathcal N(0,\sigma^2)$. This is the benchmark, and it is **not** zero.
+* The MDN samples come close to that benchmark overall and in three of the four regions. Beyond the support the fit is clearly worse (about 79% within $\pm2\sigma$ against about 91% for exact-posterior samples), the same weak spot as in §6.3. This is a forward-model consistency check: the sampled inverses explain the observations nearly as well as the true inverses.
+* The single-Gaussian samples fail it. Only about a third of their residuals fall within $\pm2\sigma$, and the KS distance is large. Many samples fall between the branches, or outside $|t|\le2$, where $t^2$ is far from $x$. Its plain standard deviation is several times its robust one, which confirms that a few extreme samples inflate it.
 * The MSE point prediction has residual $\approx x$ for positive observations. Only about 0.2% of its residuals in the two-branch region are within $\pm2\sigma$. It is consistent with the data only near $x\approx0$.
 * Region by region, a non-zero *mean* residual can be the correct answer. Beyond the support ($x>a^2$) the residual is positive, because $t^2\le4$ cannot reach $x$. For negative $x$ it is negative, because $t^2\ge0$ cannot go below 0. The exact posterior samples show the same shifts, so residuals should always be compared with the noise level and with the reference, never with zero.
 """)
@@ -1128,8 +1246,14 @@ b = df_base
 summary.append(("Part 4", "baseline excess NLL, single Gaussian (M=1)", ms(b[b.M == 1], "excess_nll")))
 summary.append(("Part 4", "baseline excess NLL, MDN (M=3)", ms(b[b.M == 3], "excess_nll")))
 summary.append(("Part 4", "baseline W1, single Gaussian / MDN M=3", f"{ms(b[b.M == 1], 'w1')} / {ms(b[b.M == 3], 'w1')}"))
+RES_KEYS = ["true t (= noise eps)", "MDN sample", "single-Gaussian sample", "MSE point prediction"]
+summary.append(("Part 4", "fraction of residuals within 2 sigma (true t / MDN / single Gauss. / MSE)",
+                " / ".join(f"{np.mean(np.abs(res[k]) <= 2 * SIGMA):.3f}" for k in RES_KEYS)))
 summary.append(("Part 4", "residual sd (true t / MDN / single Gauss. / MSE), sigma = 0.15",
-                " / ".join(f"{res[k].std():.3f}" for k in ["true t (= noise eps)", "MDN sample", "single-Gaussian sample", "MSE point prediction"])))
+                " / ".join(f"{res[k].std():.3f}" for k in RES_KEYS)))
+summary.append(("Part 4", "PIT KS distance, seed 0 (exact / single Gauss. / MDN)",
+                " / ".join(f"{head_to_head.loc[k, 'PIT_KS']:.3f}" for k in
+                           ["exact posterior (quadrature)", "single Gaussian (M=1)", f"MDN (M={BASE_MDN.M})"])))
 for q in Q_LIST:
     d = df_asym[(df_asym.q == q) & (df_asym.M == 3)]
     summary.append(("Part 5", f"q = {q}: MDN M=3 minority capture / recovery rate", f"{ms(d, 'capture_neg')} / {ms(d, 'recovered_neg')}"))
@@ -1172,11 +1296,14 @@ with variances that follow the theoretical branch width.
 
 **Part 4: comparison.** On the same held-out test set, the MDN's NLL is within about 0.03 nats of the
 exact posterior's, while the single-Gaussian network is about 1.7 nats worse. W1 tells the same
-story (about 0.03–0.04 vs 0.45). Branch probabilities are close to 0.5 for *both* models, which shows
-that a correct sign split does not imply a correct density. Forward residuals of MDN samples have
-about the spread of the noise ($\sigma=0.15$). Residuals of single-Gaussian samples and of the MSE
-prediction are an order of magnitude larger. The residuals are *meant* to be non-zero, because the
-data is noisy.
+story (about 0.03–0.04 vs 0.45). On validation data any $M\ge2$ is as good as any other, so $M=3$ is
+a safe choice rather than a tuned optimum. The MDN's remaining error is concentrated beyond the
+support, where a Gaussian mixture cannot draw the hard edge; the visibly imperfect dip in the merged
+region costs almost nothing. The MDN is calibrated (flat PIT histogram) and the single Gaussian is
+not. Branch probabilities are close to 0.5 for *both* models, which shows that a correct sign split
+does not imply a correct density. About 95% of the MDN's forward residuals fall within $\pm2\sigma$,
+like the true noise, against roughly a third for the single Gaussian. The residuals are *meant* to be
+non-zero, because the data is noisy.
 
 **Part 5: imbalance and sensitivity.** With $M\ge2$, the MDN recovered the minority branch in every
 run we trained, at 70:30, 90:10 and even 97:3. The rare branch was, however, slightly under-weighted

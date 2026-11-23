@@ -179,14 +179,20 @@ leaked mass separately (about 0.7% for the MDN) and truncate only for the grid-b
 
 ### Baseline (symmetric prior, σ = 0.15)
 
-| Model | Excess NLL | W1 | Residual sd (target 0.15) | Test MSE |
-|---|---|---|---|---|
-| MSE network | n/a | n/a | 1.20 | 1.339 |
-| Single Gaussian ($M=1$) | 1.68 | 0.45 | 2.63 | 1.339 |
-| **MDN ($M=3$)** | **0.03** | **0.04** | **0.16** | 1.338 |
-| Exact posterior | 0 | 0 | 0.15 | 1.339 |
+| Model | Excess NLL¹ | W1¹ | Residuals within ±2σ² (target ≈ 0.95) | PIT KS distance² (0 = calibrated) | Test MSE |
+|---|---|---|---|---|---|
+| MSE network | n/a | n/a | 0.26 | n/a | 1.339 |
+| Single Gaussian ($M=1$) | 1.68 | 0.45 | 0.35 | 0.24 | 1.339 |
+| **MDN ($M=3$)** | **0.03** | **0.04** | **0.94** | **0.013** | 1.338 |
+| Exact posterior | 0 | 0 | 0.96 | 0.012 | 1.339 |
+
+¹ mean over 5 seeds. ² seed-0 model, held-out test set (20 posterior samples per observation for the residuals).
 
 All models have essentially the same MSE, but only the MDN has the right distribution.
+On **validation** NLL any $M\ge2$ is as good as any other ($M=2,3,5$ within one seed-sd), so $M=3$ is a
+safe choice, not a tuned optimum. Split by input region, about a quarter of the MDN's small excess NLL
+comes from the 1% of test points beyond the support ($x>a^2$), where a Gaussian mixture cannot draw the
+hard edge at $\pm a$.
 Branch probability is about 0.5 for **both** probabilistic models, so a correct sign split does not
 imply a correct density.
 
