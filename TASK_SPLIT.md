@@ -84,7 +84,7 @@ Mention results in your segment only if they are finished and checked.
 | Person | Idea |
 |---|---|
 | Ashwath | Make the quadrature for Z(x) faster or vectorised without losing accuracy (check against the 400 001-point grid) |
-| Joel | Add an absolute-loss (median) network next to the MSE network, to show it also lands off the branches |
+| Joel | Add an absolute-loss (median) network next to the MSE network, to show it also lands off the branches. **Done: notebook §4.1** (result: off the branches for q = 0.5, on the majority branch for q = 0.9, never both) |
 | Arnav | Try truncated mixtures to remove the about 0.7% of mass that leaks outside [−a, a] |
 | Aamil | Choose M by held-out NLL across M ∈ {1, 2, 3, 5} and justify the pick |
 | Rohan | **Completed:** Tested smaller training sets ($N \in \{1000, 2500\}$) and extreme imbalance ($q=0.99$); proved recovery holds down to ~30 minority points ($N=1000, q=0.97$), identified failure boundary at $\approx 10$ points ($N=1000, q=0.99$), and demonstrated that spread initialisation rescues the rare branch in this data-starved regime. |
