@@ -81,7 +81,7 @@ from p8.config import DataConfig, TrainConfig, MDNConfig, CODE_VERSION
 from p8.data import set_seed, make_splits
 from p8 import reference as R
 from p8 import evaluate as E
-from p8.training import DEVICE, train_mse_model, train_single_gaussian_model, train_mdn
+from p8.training import DEVICE, train_mse_model, train_mae_model, train_single_gaussian_model, train_mdn
 from p8.experiments import T_GRID, N_EVAL, get_context, get_model, run_mdn_setting, run_sweep, mean_sd_table
 from p8.plotting import COLORS, set_style, savefig, plot_history
 
@@ -431,6 +431,96 @@ md(r"""
 **Answer to Part 2.**
 * **Symmetric prior:** the MSE prediction lies *between* the branches across the whole two-branch region $x\ge2\sigma$. It sits near 0, which corresponds to neither $+\sqrt x$ nor $-\sqrt x$. Only for $x\le 0$ is predicting 0 sensible, because there the posterior really is a single bump at 0.
 * **Asymmetric prior ($q=0.9$):** $\mathbb E[t\mid x]\approx 0.8\sqrt{x}$ is $0.2\sqrt x$ away from the $+$ branch, while the branch width $w(x)$ shrinks like $1/\sqrt x$. So the prediction counts as "near the + branch" only for small $x$ (where the branch is wide) and lies **between** the branches for larger $x$ (see the tables above). An imbalanced prior moves the mean toward the majority branch but never puts it exactly on a branch. The minority branch never appears in a point prediction at all.
+""")
+
+md(r"""
+### 4.1 Would a different point loss help? Absolute error and the conditional median
+Squared error is not special here. Replacing it with absolute error,
+$\frac1N\sum_i|f_\theta(x_i)-t_i|$, changes *which* summary of $p(t\mid x)$ the network learns, but it is
+still a single number. For fixed $x$,
+
+$$ \frac{d}{df}\,\mathbb E\big[\,|f-t|\;\big|\;x\big] = P(t\le f\mid x)-P(t>f\mid x) = 2F(f\mid x)-1, $$
+
+which is zero at the **conditional median** $F^{-1}(\tfrac12\mid x)$. (In general: squared loss gives the
+mean, absolute loss the median, pinball loss a quantile.) The theory predicts two different failures.
+
+* **Symmetric prior:** $F(0\mid x)=\tfrac12$, so the median is 0, between the branches again. Worse,
+  almost no probability lies between $-\sqrt x$ and $+\sqrt x$, so $F$ stays at about $\tfrac12$ across the
+  *whole* gap and the loss barely changes wherever $f$ sits inside it. The shaded **median band** below
+  marks where $F(f\mid x)\in[0.499,\,0.501]$. Anywhere in it, the expected absolute error is within
+  $0.002\times$(band width) of the optimum, so the median is only **weakly identified**.
+* **Imbalanced prior ($q=0.9$):** $F(0\mid x)=1-q=0.1<\tfrac12$, so the median lies *on the majority
+  branch*: it is the point with $0.4/0.9\approx44\%$ of the $+$ branch's mass below it, just under
+  $+\sqrt x$. That is a valid inverse, but only one of the two. The minority branch is ignored.
+
+We train the same 3×64 network with absolute error (5 seeds per prior, same data as above) and compare
+it with the exact conditional median from quadrature (`R.reference_median`, the midpoint of a vanishingly
+narrow median band, which gives exactly 0 in the symmetric case).
+""")
+code(r"""
+MAE_SEEDS = SEEDS
+mae_models = {name: [train_mae_model(ctx.dcfg, TRAIN, seed=s, splits=ctx.splits, use_cache=USE_CACHE)[0] for s in MAE_SEEDS]
+              for name, (_, _, ctx) in mse_models.items()}
+
+x_line = np.linspace(-0.6, 4.8, 109)
+x_two = np.linspace(2 * SIGMA, A**2, 400)       # the two-branch region, where "near / between" is defined
+fig, axes = plt.subplots(1, 2, figsize=(12, 4.4), sharey=True)
+mae_rows = []
+for ax, (name, (mse_model, _, ctx)) in zip(axes, mse_models.items()):
+    q = ctx.dcfg.q
+    x_te, t_te = ctx.splits["test"]
+    ax.scatter(x_te, t_te, s=3, alpha=0.3, color="grey", label="held-out test pairs")
+    xs = np.linspace(0, A**2, 200)
+    ax.plot(xs, np.sqrt(xs), color=COLORS["branch"], lw=2, label=r"branches $\pm\sqrt{x}$")
+    ax.plot(xs, -np.sqrt(xs), color=COLORS["branch"], lw=2)
+    band = np.array([R.reference_median_band(x, A, SIGMA, q) for x in x_line])
+    ax.fill_between(x_line, band[:, 0], band[:, 1], color=COLORS["mae"], alpha=0.15, lw=0,
+                    label=r"median band: $P(t\leq f\mid x) \in [0.499,\ 0.501]$")
+    ax.plot(x_line, [R.reference_median(x, A, SIGMA, q) for x in x_line], color=COLORS["reference"], ls="--", lw=2,
+            label="exact conditional median")
+    ax.plot(x_line, E.predict_point(mse_model, x_line), color=COLORS["mse"], lw=1.5, alpha=0.7, label="MSE network (mean)")
+    for i, m in enumerate(mae_models[name]):
+        ax.plot(x_line, E.predict_point(m, x_line), color=COLORS["mae"], lw=1.3,
+                label=f"MAE networks ({len(MAE_SEEDS)} seeds)" if i == 0 else None)
+    ax.set(xlabel="observation x", title=f"MAE network vs conditional median ({name})")
+
+    # scores on held-out data, and where the prediction sits relative to the branches
+    med_test = np.array([R.reference_median(x, A, SIGMA, q) for x in x_te])
+    for kind, seed, model in [("MSE", 0, mse_model)] + [("MAE", s, m) for s, m in zip(MAE_SEEDS, mae_models[name])]:
+        f_te, f_two = E.predict_point(model, x_te), E.predict_point(model, x_two)
+        pos = branch_position(f_two, x_two, SIGMA, A)
+        mae_rows.append(dict(prior=name, loss=kind, seed=seed,
+                             test_MAE=np.mean(np.abs(f_te - t_te)), test_MSE=np.mean((f_te - t_te) ** 2),
+                             frac_near_plus=np.mean(pos == "near + branch"), frac_near_minus=np.mean(pos == "near - branch"),
+                             frac_between=np.mean(pos == "BETWEEN branches"),
+                             mean_abs_f2_minus_x=np.mean(np.abs(f_two**2 - x_two))))
+    mae_rows.append(dict(prior=name, loss="exact median", seed=np.nan,
+                         test_MAE=np.mean(np.abs(med_test - t_te)), test_MSE=np.mean((med_test - t_te) ** 2)))
+axes[0].set_ylabel("t"); axes[0].legend(loc="lower left", fontsize=8)
+savefig(fig, "04_mae_predictions"); plt.show()
+
+df_mae = pd.DataFrame(mae_rows)
+df_mae.to_csv(RESULTS / "part2_mae_vs_mse.csv", index=False)
+display(df_mae.groupby(["prior", "loss"], sort=False).agg(["mean", "std"]).drop(columns="seed")
+        [["test_MAE", "test_MSE", "frac_near_plus", "frac_between", "mean_abs_f2_minus_x"]].round(3))
+""")
+md(r"""
+**Results of §4.1.**
+* **$q=0.5$:** the MAE networks never show both branches, and they are not even stable. Each seed
+  settles somewhere different inside the median band, and part of each curve drifts up onto the $+$
+  branch (in our run, 21–46% of the two-branch region counts as "near +", the rest "between"). The upward
+  pull comes from the training sample, which happens to contain 50.8% positive $t$. With a flat loss, a
+  tiny sampling imbalance decides where the prediction goes. Even so, their test MAE (about 1.02) is
+  within 2% of the exact median's (1.003), while their test MSE is much worse (about 2.3 vs 1.34). A small
+  gap in a point loss can hide very different predictions.
+* **$q=0.9$:** the MAE networks match the exact median (test MAE 0.264 for every seed, equal to the
+  exact median's) and lie **near the $+$ branch across the whole two-branch region** (100%, against
+  about 22% for the MSE network). Their predictions are valid inverses: $|f(x)^2-x|$ averages about 0.03,
+  against about 0.8 for the MSE network.
+* **Conclusion:** the point loss only decides *which single answer* comes out: between the branches
+  (mean), anywhere in the gap (median, symmetric prior), or on the majority branch (median, imbalanced
+  prior). None of them can say that $-\sqrt x$ is also a valid answer. For that we need a model of the
+  whole distribution, which is the next section.
 """)
 
 # =============================================================================== 5. Part 3
@@ -1071,7 +1161,9 @@ matches the quadrature mean, and its test MSE equals that of the exact condition
 therefore an accurate estimate of the wrong summary for this problem. Under the symmetric prior its
 prediction lies *between* the branches for every $x$ in the two-branch region. With $q=0.9$ it lies
 near the majority branch only for $x\lesssim1.1$ and between the branches beyond that. It never
-represents the second solution.
+represents the second solution. Switching to absolute error (§4.1) learns the conditional median
+instead: with $q=0.9$ it sits on the majority branch, a valid but incomplete answer, and with the
+symmetric prior it is only weakly determined anywhere in the gap. Either way one answer comes out.
 
 **Part 3: the MDN** (softmax weights, softplus-plus-floor variances, log-sum-exp likelihood) trained
 stably. Its weights sum to one, its variances stay positive, and its likelihood is finite even for
