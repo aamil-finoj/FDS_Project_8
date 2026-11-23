@@ -40,9 +40,13 @@ class MDNConfig:
     M: int = 3                # number of mixture components
     var_floor: float = 1e-4   # v_min added after softplus (a VARIANCE, so std floor = 0.01)
     mu_init: str = "default"  # "default" (PyTorch init) or "spread" (means start spread over [-a, a])
+    truncate: bool = False    # if True, truncate each Gaussian component to [-a, a]
 
     def to_dict(self):
-        return asdict(self)
+        d = asdict(self)
+        if not self.truncate:
+            d.pop("truncate")
+        return d
 
 
 # Bump this whenever model/training code changes so stale cached runs are never reused.

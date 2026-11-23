@@ -14,8 +14,8 @@ Conventions
 """
 import numpy as np
 import torch
-from scipy.special import ndtr
-from scipy.stats import wasserstein_distance
+from scipy.special import log_ndtr, ndtr
+from scipy.stats import truncnorm, wasserstein_distance
 
 from .reference import reference_density_grid
 from .training import DEVICE
@@ -23,6 +23,16 @@ from .training import DEVICE
 
 def _t(a):
     return torch.as_tensor(np.asarray(a, dtype=np.float32), device=DEVICE)
+
+
+def _log_norm_cdf_diff(lo_z, hi_z):
+    """Stable log(Phi(hi_z) - Phi(lo_z)) for lo_z < hi_z in NumPy."""
+    flip = (lo_z + hi_z) > 0
+    a = np.where(flip, -hi_z, lo_z)
+    b = np.where(flip, -lo_z, hi_z)
+    log_a = log_ndtr(a)
+    log_b = log_ndtr(b)
+    return log_b + np.log(np.maximum(-np.expm1(log_a - log_b), 1e-300))
 
 
 @torch.no_grad()
@@ -38,17 +48,34 @@ def predict_point(model, x):
 
 
 def predict_conditional_density(model, x_values, t_grid):
-    """Predicted p_theta(t | x) on a grid, shape (len(x_values), len(t_grid)). Not renormalised."""
+    """Predicted p_theta(t | x) on a grid, shape (len(x_values), len(t_grid))."""
     pi, mu, var = mdn_params(model, x_values)
-    t = np.asarray(t_grid)[None, :, None]
-    comp = np.exp(-0.5 * (t - mu[:, None, :]) ** 2 / var[:, None, :]) / np.sqrt(2 * np.pi * var[:, None, :])
-    return (pi[:, None, :] * comp).sum(-1)
+    t_arr = np.asarray(t_grid, dtype=float)
+    t = t_arr[None, :, None]
+    log_comp = -0.5 * (np.log(2 * np.pi * var[:, None, :]) + (t - mu[:, None, :]) ** 2 / var[:, None, :])
+    if getattr(model, "truncate", False):
+        a = model.a
+        sd = np.sqrt(var)
+        log_z = _log_norm_cdf_diff((-a - mu) / sd, (a - mu) / sd)[:, None, :]
+        comp = np.exp(log_comp - log_z)
+        dens = (pi[:, None, :] * comp).sum(-1)
+        return np.where(np.abs(t_arr)[None, :] <= a, dens, 0.0)
+    return (pi[:, None, :] * np.exp(log_comp)).sum(-1)
 
 
 def mixture_mean(model, x):
-    """E_theta[t | x] = sum_j pi_j mu_j  (the MDN's own point summary)."""
-    pi, mu, _ = mdn_params(model, x)
-    return (pi * mu).sum(-1)
+    """E_theta[t | x] (exact conditional mean for both standard and truncated MDNs)."""
+    pi, mu, var = mdn_params(model, x)
+    if not getattr(model, "truncate", False):
+        return (pi * mu).sum(-1)
+    a = model.a
+    sd = np.sqrt(var)
+    az, bz = (-a - mu) / sd, (a - mu) / sd
+    log_z = _log_norm_cdf_diff(az, bz)
+    log_phi_a = -0.5 * (np.log(2 * np.pi) + az**2)
+    log_phi_b = -0.5 * (np.log(2 * np.pi) + bz**2)
+    comp_mean = mu + sd * (np.exp(log_phi_a - log_z) - np.exp(log_phi_b - log_z))
+    return (pi * comp_mean).sum(-1)
 
 
 @torch.no_grad()
@@ -62,7 +89,7 @@ def sample_conditional(model, x, n_samples, seed=0):
     """Draw n_samples t ~ p_theta(t | x) for each x; returns shape (len(x), n_samples).
 
     Two-step ancestral sampling: pick component j ~ Categorical(pi(x)), then
-    t ~ N(mu_j, v_j) using std = sqrt(v_j).
+    t ~ N(mu_j, v_j) (or TN(mu_j, v_j; -a, a) when truncated) using std = sqrt(v_j).
     """
     rng = np.random.default_rng(seed)
     pi, mu, var = mdn_params(model, x)
@@ -71,7 +98,13 @@ def sample_conditional(model, x, n_samples, seed=0):
     u = rng.uniform(size=(n_x, n_samples))
     comp = (u[:, :, None] > cum[:, None, :]).sum(-1).clip(max=M - 1)
     rows = np.arange(n_x)[:, None]
-    return mu[rows, comp] + np.sqrt(var[rows, comp]) * rng.standard_normal((n_x, n_samples))
+    mu_c = mu[rows, comp]
+    sd_c = np.sqrt(var[rows, comp])
+    if getattr(model, "truncate", False):
+        a = model.a
+        return truncnorm.rvs((-a - mu_c) / sd_c, (a - mu_c) / sd_c,
+                             loc=mu_c, scale=sd_c, random_state=rng)
+    return mu_c + sd_c * rng.standard_normal((n_x, n_samples))
 
 
 def sample_reference(x_values, t_grid, a, sigma, q, n_samples, seed=0):
@@ -91,21 +124,34 @@ def model_mass_in_interval(model, x, lo, hi):
     """Predicted probability mass in [lo, hi] (lo/hi broadcast against x)."""
     pi, mu, var = mdn_params(model, x)
     sd = np.sqrt(var)
-    lo = np.asarray(lo, dtype=float).reshape(-1, 1)
-    hi = np.asarray(hi, dtype=float).reshape(-1, 1)
-    return (pi * (ndtr((hi - mu) / sd) - ndtr((lo - mu) / sd))).sum(-1)
+    lo_arr = np.asarray(lo, dtype=float).reshape(-1, 1)
+    hi_arr = np.asarray(hi, dtype=float).reshape(-1, 1)
+    if getattr(model, "truncate", False):
+        a = model.a
+        lo_c = np.maximum(lo_arr, -a)
+        hi_c = np.minimum(hi_arr, a)
+        valid = hi_c > lo_c
+        log_z = _log_norm_cdf_diff((-a - mu) / sd, (a - mu) / sd)
+        safe_hi = np.where(valid, hi_c, lo_c + 1e-6)
+        log_num = _log_norm_cdf_diff((lo_c - mu) / sd, (safe_hi - mu) / sd)
+        comp_mass = np.where(valid, np.exp(log_num - log_z), 0.0)
+        return (pi * comp_mass).sum(-1)
+    return (pi * (ndtr((hi_arr - mu) / sd) - ndtr((lo_arr - mu) / sd))).sum(-1)
 
 
 def model_branch_probability(model, x):
-    """P_hat(t > 0 | x) = sum_j pi_j Phi(mu_j / sqrt v_j)."""
-    pi, mu, var = mdn_params(model, x)
+    """P_hat(t > 0 | x) = sum_j pi_j P_j(t > 0 | x)."""
+    x_arr = np.atleast_1d(x)
+    if getattr(model, "truncate", False):
+        return model_mass_in_interval(model, x_arr, np.zeros(len(x_arr)), np.full(len(x_arr), model.a))
+    pi, mu, var = mdn_params(model, x_arr)
     return (pi * ndtr(mu / np.sqrt(var))).sum(-1)
 
 
 def out_of_support_mass(model, x, a):
     """Predicted mass outside the prior support [-a, a] (should be ~0 for a good model)."""
     x = np.atleast_1d(x)
-    return 1.0 - model_mass_in_interval(model, x, np.full(len(x), -a), np.full(len(x), a))
+    return np.maximum(0.0, 1.0 - model_mass_in_interval(model, x, np.full(len(x), -a), np.full(len(x), a)))
 
 
 def branch_neighbourhoods(x, sigma, a, k=3.0):

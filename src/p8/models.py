@@ -57,9 +57,10 @@ class MDN(nn.Module):
     """
 
     def __init__(self, x_mean, x_std, M=3, hidden=64, n_layers=3, var_floor=1e-4,
-                 mu_init="default", a=2.0):
+                 mu_init="default", a=2.0, truncate=False):
         super().__init__()
         self.M, self.var_floor = M, var_floor
+        self.a, self.truncate = float(a), bool(truncate)
         self.scale = _Standardise(x_mean, x_std)
         self.trunk = make_trunk(hidden, n_layers)
         self.logit_head = nn.Linear(hidden, M)
@@ -85,7 +86,10 @@ class MDN(nn.Module):
     def log_prob(self, t, x):
         """log p(t_i | x_i) for paired 1-D tensors, computed stably with logsumexp."""
         log_pi, mu, var = self(x)
-        return mixture_log_prob(t.unsqueeze(-1), log_pi, mu, var)
+        if not self.truncate:
+            return mixture_log_prob(t.unsqueeze(-1), log_pi, mu, var)
+        lp = truncated_mixture_log_prob(t.unsqueeze(-1), log_pi, mu, var, self.a)
+        return torch.where(t.abs() <= self.a, lp, torch.full_like(lp, float("-inf")))
 
 
 def gaussian_log_pdf(t, mu, var):
@@ -93,9 +97,31 @@ def gaussian_log_pdf(t, mu, var):
     return -0.5 * (math.log(2 * math.pi) + torch.log(var) + (t - mu) ** 2 / var)
 
 
+def log_norm_cdf_diff(lo_z, hi_z):
+    """Stable log(Phi(hi_z) - Phi(lo_z)) for lo_z < hi_z using tail symmetry."""
+    flip = (lo_z + hi_z) > 0
+    a = torch.where(flip, -hi_z, lo_z)
+    b = torch.where(flip, -lo_z, hi_z)
+    log_a = torch.special.log_ndtr(a)
+    log_b = torch.special.log_ndtr(b)
+    return log_b + torch.log((-torch.expm1(log_a - log_b)).clamp(min=1e-38))
+
+
+def truncated_gaussian_log_pdf(t, mu, var, a):
+    """log N(t | mu, var) truncated and normalised to [-a, a]."""
+    sd = torch.sqrt(var)
+    log_Z = log_norm_cdf_diff((-a - mu) / sd, (a - mu) / sd)
+    return gaussian_log_pdf(t, mu, var) - log_Z
+
+
 def mixture_log_prob(t, log_pi, mu, var):
     """log sum_j pi_j N(t | mu_j, v_j) = logsumexp_j [log pi_j + log N_j]; broadcasts over last dim."""
     return torch.logsumexp(log_pi + gaussian_log_pdf(t, mu, var), dim=-1)
+
+
+def truncated_mixture_log_prob(t, log_pi, mu, var, a):
+    """log sum_j pi_j TN(t | mu_j, v_j; -a, a) computed in log space with logsumexp."""
+    return torch.logsumexp(log_pi + truncated_gaussian_log_pdf(t, mu, var, a), dim=-1)
 
 
 def mdn_nll_loss(model: MDN, x, t):

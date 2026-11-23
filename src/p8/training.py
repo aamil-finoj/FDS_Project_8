@@ -79,7 +79,7 @@ def build_model(kind: str, train, tcfg: TrainConfig, mcfg: MDNConfig | None = No
     if kind == "mse":
         return MSENet(x_mean, x_std, tcfg.hidden, tcfg.n_layers)
     return MDN(x_mean, x_std, M=mcfg.M, hidden=tcfg.hidden, n_layers=tcfg.n_layers,
-               var_floor=mcfg.var_floor, mu_init=mcfg.mu_init, a=a)
+               var_floor=mcfg.var_floor, mu_init=mcfg.mu_init, a=a, truncate=mcfg.truncate)
 
 
 def _run_key(kind, dcfg, tcfg, mcfg, seed):
