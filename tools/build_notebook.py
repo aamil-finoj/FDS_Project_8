@@ -715,12 +715,21 @@ fig.suptitle("Standard vs truncated MDN (M = 3, symmetric baseline)")
 savefig(fig, "05_truncated_mdn"); plt.show()
 """)
 md(r"""
-Truncating the mixture components removes **100% of the out-of-support leakage** (`out_mass = 0.000`
-for every $x$, even beyond $x=a^2$ where the standard MDN leaks over 65% of its mass at $x=4.5$),
-and cuts the baseline excess NLL by roughly **40%** (from ~0.031 down to ~0.019 nats) by stopping
-boundary components from wasting probability mass outside $[-a,a]$. Elsewhere the two models behave
-comparably, confirming that the standard MDN already matches the interior posterior well while
-truncation cleanly resolves the hard support edges.
+**Truncated-MDN result.**
+* **No leaked mass.** The truncated MDN has `out_mass = 0.000` at every $x$. The standard MDN leaks about
+  0.7% on average over the test inputs, but most of it sits at large $x$: about 19% of its mass at $x=4$
+  and 70% at $x=4.5$ (seed 0), where both true modes are pinned at $\pm a$.
+* **Better likelihood, on every seed.** Baseline excess NLL drops from 0.030 ± 0.007 to 0.018 ± 0.006 nats
+  (about 37% lower). The truncated model is better on each of the 5 seeds (by 0.005 to 0.015 nats) and
+  also on validation NLL, so this is not seed noise.
+* **No change in branch recovery.** Minority and majority capture are unchanged within seed noise.
+* **W1 does not improve** (0.040 vs 0.048, within one seed-sd). That is expected: W1 already truncates
+  the standard MDN to $[-a,a]$ before comparing, so it never saw the leak. The gain is in the likelihood,
+  where leaked mass is a real cost.
+
+The rest of the notebook keeps the standard MDN so that it matches the assignment's model. The
+truncated version shows that building the support into the model removes the leak and lowers the
+excess NLL, which targets the main remaining error found in §6.3 (beyond the support).
 """)
 
 # =============================================================================== 6. Part 4
@@ -1218,40 +1227,102 @@ The project's stated limitation was that experiments used a single dataset size 
 To discover when the rare branch is actually lost, we stress-test the MDN across:
 * **Training set sizes:** $N_{\rm train} \in \{1000, 2500, 10000\}$
 * **Extreme imbalance:** $q \in \{0.90, 0.97, 0.99\}$ (where $q=0.99$ leaves only 1% of points, i.e. $\approx 10$ points at $N=1000$)
-* **Initialisation:** default vs spread initialisation at $q=0.99$ across 5 seeds
-""")
-code(r"""
-# Load or run sample size sweep
-sweep_file = RESULTS / "part5_sample_size_sweep.csv"
-if sweep_file.exists():
-    df_samples = pd.read_csv(sweep_file)
-else:
-    from tools.run_rohan_experiment import N_LIST, Q_LIST
-    # Fallback to run if not precomputed
-    df_samples = pd.read_csv(sweep_file)
-
-default_samples = df_samples[df_samples.mu_init == "default"]
-print("Minority branch recovery across training set sizes and imbalance levels (mean ± sd):")
-display(mean_sd_table(default_samples, ["n_train", "q"], ["capture_neg", "recovered_neg", "excess_nll", "branch_err"]))
-
-print("\nEffect of initialisation at extreme imbalance (q = 0.99):")
-sub_init = df_samples[df_samples.q == 0.99]
-display(sub_init.groupby(["n_train", "mu_init"])[["capture_neg", "recovered_neg", "excess_nll"]].agg(["mean", "std"]).round(3))
+* **Initialisation:** default vs spread initialisation at $q=0.99$, at every $N_{\rm train}$
+* $M=3$ and 5 seeds throughout. "Recovered fraction" is `recovered_neg`: the share of the 21 recovery-grid
+  inputs at which minority capture is at least 0.5. It is not a share of seeds.
 """)
 md(r"""
-<p align="center">
-<img src="figures/07_sample_size_stress_test.png" width="900"><br>
-<em>Left: Minority-branch capture vs sample size. Center: Recovery rate. Right: Excess NLL.</em>
-</p>
-<p align="center">
-<img src="figures/07_sample_size_initialisation.png" width="600"><br>
-<em>Extreme imbalance (q = 0.99): Default vs spread initialisation at N = 1000 and 2500.</em>
-</p>
+**Protocol.** Same network, loss, optimiser, batch size, early stopping, 5 seeds and the same validation and
+test set sizes (2000 each) as every other sweep. Only the number of training points changes. A smaller
+training set gives fewer gradient steps per epoch, so `max_epochs` is scaled by $10\,000/N_{\rm train}$ to keep
+the same step budget. Early stopping on validation NLL still decides when each run stops. The $N=10\,000$
+runs are exactly the §7.1 settings, so those rows reuse the same trained models.
+""")
+code(r"""
+SS_N, SS_Q = [1000, 2500, 10_000], [0.90, 0.97, 0.99]
 
-**Key takeaways from the sample-size stress test:**
-* **Surprising robustness:** Even at $N_{\rm train}=1000$ with $q=0.97$ (only $\approx 30$ minority points), the MDN maintains a **100% recovery rate** (capture $1.21 \pm 0.28$).
-* **The breaking point ($N=1000, q=0.99$):** When the minority sample count drops to $\approx 10$ points, default initialisation fails: minority capture drops to **0.430** (below the 0.5 threshold) and recovery rate plummets to **26.7%**.
-* **When spread initialisation matters:** At $N=10\,000$, initialisation made negligible difference because gradient signals were ample. But at the breaking point ($N=1000, q=0.99$), spread initialisation lifts minority capture from $0.430$ to **$0.587$** (above the recovery threshold) and recovery rate to $35.2\%$, proving its value in extreme data-scarcity regimes.
+def ss_train(n):                       # same step budget for every training-set size
+    return replace(TRAIN, max_epochs=int(TRAIN.max_epochs * 10_000 / n))
+
+ss_rows = []
+for n in SS_N:
+    settings = [(replace(BASE_DATA, n_train=n, q=q), MDNConfig(M=3)) for q in SS_Q]
+    settings += [(replace(BASE_DATA, n_train=n, q=0.99), MDNConfig(M=3, mu_init="spread"))]
+    d = run_sweep(settings, ss_train(n), SEEDS, use_cache=USE_CACHE)
+    d["n_train"] = n
+    ss_rows.append(d)
+df_samples = pd.concat(ss_rows, ignore_index=True)
+df_samples["minority_n"] = (df_samples.n_train * (1 - df_samples.q)).round().astype(int)
+df_samples["hit_epoch_cap"] = df_samples.epochs_run >= [int(TRAIN.max_epochs * 10_000 / n) for n in df_samples.n_train]
+df_samples.to_csv(RESULTS / "part5_sample_size_sweep.csv", index=False)
+print("runs that hit the epoch cap instead of early-stopping:", int(df_samples.hit_epoch_cap.sum()), "of", len(df_samples))
+
+ss_cols = ["capture_neg", "recovered_neg", "excess_nll", "branch_err"]
+print("\nDefault initialisation (mean ± sd over 5 seeds):")
+display(mean_sd_table(df_samples[df_samples.mu_init == "default"], ["n_train", "q"], ss_cols))
+print("Runs with the minority branch not recovered (capture < 0.5), default init:")
+bad = df_samples[(df_samples.mu_init == "default") & (df_samples.capture_neg < 0.5)]
+display(bad[["n_train", "q", "minority_n", "seed", "capture_neg", "recovered_neg", "excess_nll"]].round(3))
+print("Default vs spread initialisation at q = 0.99:")
+display(mean_sd_table(df_samples[df_samples.q == 0.99], ["n_train", "mu_init"], ["capture_neg", "recovered_neg", "excess_nll"]))
+""")
+code(r"""
+dflt = df_samples[df_samples.mu_init == "default"]
+q_col = {0.90: COLORS["mdn"], 0.97: COLORS["single"], 0.99: COLORS["mse"]}
+fig, axes = plt.subplots(1, 3, figsize=(16, 4))
+for q in SS_Q:
+    g = dflt[dflt.q == q].groupby("n_train")
+    for ax, col in zip(axes, ["capture_neg", "recovered_neg", "excess_nll"]):
+        ax.errorbar(g[col].mean().index, g[col].mean(), yerr=g[col].std(ddof=1), marker="o", capsize=3,
+                    color=q_col[q], label=f"q = {q}")
+        ax.scatter(dflt[dflt.q == q].n_train, dflt[dflt.q == q][col], s=10, color=q_col[q], alpha=0.35)
+for ax, lab in zip(axes, ["minority-branch capture", "fraction of recovery grid recovered", "excess NLL (nats)"]):
+    ax.set(xscale="log", xticks=SS_N, xticklabels=[str(n) for n in SS_N], xlabel=r"training set size $N_{\rm train}$", ylabel=lab)
+axes[0].axhline(0.5, color="k", ls=":", lw=1, label="recovery threshold")
+axes[0].legend(fontsize=8)
+fig.suptitle("Minority-branch recovery vs training-set size (M = 3, default init; dots = single seeds)")
+savefig(fig, "07_sample_size_stress_test"); plt.show()
+
+fig, ax = plt.subplots(figsize=(8, 4))
+d99 = df_samples[df_samples.q == 0.99]
+for k, (init, col) in enumerate([("default", COLORS["mdn"]), ("spread", COLORS["branch"])]):
+    s = d99[d99.mu_init == init]
+    xs = np.arange(len(SS_N)) + (k - 0.5) * 0.3
+    g = s.groupby("n_train").capture_neg
+    ax.bar(xs, g.mean(), 0.3, yerr=g.std(ddof=1), capsize=4, color=col, alpha=0.75, label=f"{init} init")
+    for i, n in enumerate(SS_N):
+        ax.scatter(np.full(5, xs[i]), s[s.n_train == n].capture_neg, color="k", s=10, zorder=3)
+ax.axhline(0.5, color="k", ls=":", lw=1, label="recovery threshold")
+ax.set_xticks(range(len(SS_N)), [f"N = {n}\n({int(round(n * 0.01))} minority pts)" for n in SS_N])
+ax.set(ylabel="minority-branch capture", title="q = 0.99: default vs spread initialisation (dots = seeds)")
+ax.legend(fontsize=8)
+savefig(fig, "07_sample_size_initialisation"); plt.show()
+""")
+md(r"""
+
+**What the sample-size stress test shows.**
+* **Down to about 30 minority points nothing breaks.** At $q=0.9$ and $q=0.97$ the minority branch is
+  recovered at every recovery-grid input, on every seed, at every $N_{\rm train}$, including $N=1000$,
+  $q=0.97$ (about 30 minority points). With little data the rare branch is, if anything, *over*-weighted
+  (capture about 1.2 at $N=1000$, against about 0.9 at $N=10\,000$).
+* **Failure appears at about 10 minority points** ($N=1000$, $q=0.99$). Mean capture falls to
+  0.49 ± 0.23 and the recovered fraction to 0.46 ± 0.27. Two of the five seeds fall below the 0.5 threshold
+  (capture 0.43 and 0.14). This is the only setting where whole runs lose the branch.
+* **More data is not monotonically better at $q=0.99$.** $N=2500$ (about 25 minority points) recovers the
+  branch fully on all five seeds (capture 1.06 ± 0.30), but $N=10\,000$ (about 100 points) recovers it on
+  only 0.77 ± 0.19 of the grid (capture 0.78 ± 0.20), although no single run falls below 0.5. We train on
+  **one** dataset per $N$ (`data_seed` is fixed), so the seeds vary only the initialisation and not which
+  rare points were drawn. At about 25–100 minority points, one draw can easily leave a part of the rare
+  branch thinly covered. We therefore read this as dataset-to-dataset variation, not as an effect of $N$.
+  Testing that would need several data seeds per $N$.
+* **Spread initialisation does not rescue the data-starved case.** At $N=1000$ it changes capture from
+  0.49 to 0.55, but the recovered fraction goes *down* (0.46 to 0.30) and one seed still fails, all within
+  the seed-to-seed spread. Where it does help is $N=10\,000$: the recovered fraction rises from 0.77 ± 0.19 to
+  0.99 ± 0.02. So spread initialisation helps the optimiser find a thinly covered branch when there is enough
+  data to support it. It cannot create the branch from about 10 points.
+* **Density accuracy degrades smoothly.** Excess NLL grows as $N$ shrinks (at $q=0.9$: 0.035, 0.033 and 0.051
+  nats for $N=10\,000$, 2500 and 1000), and the branch-probability error roughly doubles from $N=10\,000$ to
+  $N=1000$. No run hit the epoch cap, so this is the data, not the training budget.
 """)
 
 # =============================================================================== 8. extension
@@ -1513,23 +1584,25 @@ md(r"""
   Panel (d) shows the same step at $x=0$ and $\sigma=0.05$.
 * **The MDN draws the step as a ramp about 0.1–0.2 wide in $t$** (`ramp_s90`, panel b), at every noise level.
   Measured against the width of the posterior near $t=0$ (about $\sqrt\sigma$), the ramp covers most of the
-  bump at $\sigma=0.05$ (`ramp_rel` about 0.8) and only a small part of it at $\sigma=0.5$ (about 0.16).
+  bump at $\sigma=0.05$ (`ramp_rel` about 0.8) and only a small part of it at $\sigma=0.5$ (about 0.2).
   So, like the sharp branches in §8.2, the step is drawn *worst* at low noise, relative to the posterior.
 * **It costs likelihood locally, but it does not shift the branch probability.** Test points with
   $|t|<0.25$ (about 12.5% of the data at every $\sigma$, because $t$ comes from the prior) carry an excess NLL of about
-  0.08–0.21 nats under $q=0.9$, against about 0–0.05 under the no-jump control. Scaled to the whole
-  test set this is about 0.01–0.02 nats, roughly a fifth to a half of the MDN's remaining excess NLL
-  (the standard errors are large, see the "price of the jump" table). The sign error averaged over the data,
+  0.11–0.17 nats under $q=0.9$, against 0.01–0.16 under the no-jump control. Only the *difference* is the
+  price of the jump. Scaled to the whole test set it is 0.002–0.012 nats, growing with $\sigma$: about 2% of the
+  MDN's remaining excess NLL at $\sigma=0.05$ and about 45% at $\sigma=0.5$ (the standard errors are large, see
+  the "price of the jump" table). At $\sigma=0.05$ the near-zero points are hard even without a jump (0.16
+  nats under the control), so there the jump adds almost nothing. The sign error averaged over the data,
   however, is the same about 0.03 for $q=0.9$ and $q=0.5$. The ramp is a local shape error, narrow enough
   that it does not measurably move mass between the positive and negative branches.
 * **More components do not sharpen the step.** At $\sigma=0.5$, going from $M=3$ to $M=8$ leaves the ramp
-  width (relative 0.16–0.18) and the total excess NLL (0.027–0.028) unchanged. The near-zero excess NLL
-  falls on average (0.10 to 0.04), but within the seed-to-seed spread. A sum of Gaussians is smooth
+  width (relative 0.16–0.20) and the total excess NLL (0.027–0.028) unchanged. The near-zero excess NLL
+  falls on average (0.11 to 0.03), but within the seed-to-seed spread. A sum of Gaussians is smooth
   whatever $M$ is. To imitate a step it stacks components next to each other, which adds wiggles instead
   (panel a, $M=3$).
 
-**Answer.** The prior's jump is a real limit of a Gaussian mixture, but a small one. It costs about 0.01–0.02
-nats of NLL, concentrated on the 12.5% of points nearest $t=0$. It leaves branch probabilities and
+**Answer.** The prior's jump is a real limit of a Gaussian mixture, but a small one. It costs at most about 0.01
+nats of NLL (0.002–0.012, larger at high noise), concentrated on the 12.5% of points nearest $t=0$. It leaves branch probabilities and
 recovery untouched, and more components do not fix it. Removing it would need a model that can represent
 a discontinuity at $t=0$, for example a separate sign probability times a density for $|t|$. We did not try this.
 """)
@@ -1546,6 +1619,9 @@ def ms(d, col):
 
 summary = []
 b = df_base
+for name in ["Standard MDN (M=3)", "Truncated MDN (M=3)"]:
+    d = df_trunc[df_trunc.model == name]
+    summary.append(("Part 3", f"{name}: excess NLL / out-of-support mass", f"{ms(d, 'excess_nll')} / {ms(d, 'out_mass')}"))
 summary.append(("Part 4", "baseline excess NLL, single Gaussian (M=1)", ms(b[b.M == 1], "excess_nll")))
 summary.append(("Part 4", "baseline excess NLL, MDN (M=3)", ms(b[b.M == 3], "excess_nll")))
 summary.append(("Part 4", "baseline W1, single Gaussian / MDN M=3", f"{ms(b[b.M == 1], 'w1')} / {ms(b[b.M == 3], 'w1')}"))
@@ -1564,10 +1640,17 @@ summary.append(("Part 5", "MDN runs (M>1) with minority recovery < 0.9", f"{len(
 for v in [FLOORS[0], FLOORS[-1]]:
     d = df_floor[df_floor.var_floor == v]
     summary.append(("Part 5", f"q = 0.9, floor {v:g}: excess NLL / minority capture", f"{ms(d, 'excess_nll')} / {ms(d, 'capture_neg')}"))
+for n in SS_N:
+    for init in ["default", "spread"]:
+        d = df_samples[(df_samples.n_train == n) & (df_samples.q == 0.99) & (df_samples.mu_init == init)]
+        summary.append(("Part 5", f"N = {n}, q = 0.99, {init} init: minority capture / recovered fraction / seeds with capture < 0.5",
+                        f"{ms(d, 'capture_neg')} / {ms(d, 'recovered_neg')} / {int((d.capture_neg < 0.5).sum())} of {len(d)}"))
 for s in SIGMAS:
     d = df_noise[(df_noise.sigma == s) & (df_noise.q == 0.9) & (df_noise.M == 3)]
     summary.append(("Extension", f"sigma = {s}, q = 0.9, MDN M=3: excess NLL / W1 / minority capture",
                     f"{ms(d, 'excess_nll')} / {ms(d, 'w1')} / {ms(d, 'capture_neg')}"))
+summary.append(("Extension", "prior jump at t = 0: cost in nats, sigma = " + " / ".join(f"{s:g}" for s in cost.index),
+                " / ".join(f"{cost.loc[s, 'jump cost (nats)']:.3f}" for s in cost.index)))
 summary_df = pd.DataFrame(summary, columns=["part", "quantity", "value (mean ± sd over seeds)"])
 summary_df.to_csv(RESULTS / "summary.csv", index=False)
 with pd.option_context("display.max_colwidth", 200):
@@ -1595,7 +1678,9 @@ symmetric prior it is only weakly determined anywhere in the gap. Either way one
 **Part 3: the MDN** (softmax weights, softplus-plus-floor variances, log-sum-exp likelihood) trained
 stably. Its weights sum to one, its variances stay positive, and its likelihood is finite even for
 extreme inputs, where a naive implementation returns $-\infty$. Its components lock onto $\pm\sqrt x$,
-with variances that follow the theoretical branch width.
+with variances that follow the theoretical branch width. A truncated variant (§5.5), whose components
+live on $[-a,a]$ only, removes the 0.7% of mass the standard MDN leaks outside the support and lowers
+the excess NLL from 0.030 to 0.018 nats, better on every seed.
 
 **Part 4: comparison.** On the same held-out test set, the MDN's NLL is within about 0.03 nats of the
 exact posterior's, while the single-Gaussian network is about 1.7 nats worse. W1 tells the same
@@ -1613,19 +1698,25 @@ run we trained, at 70:30, 90:10 and even 97:3. The rare branch was, however, sli
 (capture about 0.9), and its shape varied more across seeds as imbalance grew. The decisive factors
 were **model capacity** (one component can never represent both branches, whatever the data) and
 the **variance constraint** (a floor wider than the branch width smears the rare branch away).
-Initialisation scheme and $M\ge2$ had only minor effects. MSE was essentially identical for models
+Initialisation scheme and $M\ge2$ had only minor effects at $N=10\,000$ and $q\le0.97$. Shrinking the
+training set (§7.5), recovery held down to about 30 minority points ($N=1000$, $q=0.97$). It broke at
+about 10 ($N=1000$, $q=0.99$), where two of five seeds lost the branch, and spread initialisation did not
+rescue it. At $q=0.99$ with $N=10\,000$, spread initialisation did help (recovered fraction 0.77 to 0.99). MSE was essentially identical for models
 that do and do not represent both branches, so **MSE cannot assess multimodal recovery**. It only
 sees the conditional mean.
 
 **Extension.** Recovery of both branches was robust to observation noise between 0.05 and 0.5. Density
 accuracy in NLL terms was worst at the *lowest* noise, where the posterior peaks are sharpest. The
 single Gaussian looked relatively less bad at high noise only because the true posterior itself
-becomes blurrier. The prior's jump at $t=0$ is drawn as a ramp about 0.1–0.2 wide whatever $M$ is. It costs about
-0.01–0.02 nats, concentrated near $t=0$, and leaves branch probabilities and recovery untouched.
+becomes blurrier. The prior's jump at $t=0$ is drawn as a ramp about 0.1–0.2 wide whatever $M$ is. It costs at most
+about 0.01 nats, concentrated near $t=0$, and leaves branch probabilities and recovery untouched.
 
 **Limitations.**
-* All main baseline results use one network size (3x64). While our §7.5 extension explored reduced dataset sizes ($N_{\rm train} \in \{1000, 2500\}$) and identified the breaking point at $N=1000, q=0.99$ (~10 minority points), network depth/width variations remain an open exploration.
-* A Gaussian mixture cannot represent the hard support edges or the prior's jump at $t=0$ exactly. Our grid metrics truncate the MDN to $[-a,a]$, and we report the leaked mass separately (about 1% for the MDN).
+* All results use one network size (3×64). Apart from §7.5 they also use one training-set size ($N=10\,000$).
+* Every setting uses a single dataset (`data_seed` fixed); the 5 seeds vary only the initialisation. That is
+  enough for the main results, but at very few minority points (§7.5, $q=0.99$) the draw of rare points
+  matters, and we cannot separate it from the effect of $N$.
+* A Gaussian mixture cannot represent the hard support edges or the prior's jump at $t=0$ exactly. Our grid metrics truncate the MDN to $[-a,a]$, and we report the leaked mass separately (about 0.7% for the MDN). The truncated MDN of §5.5 fixes the edges but not the jump.
 * The branch-recovery threshold (capture $\ge0.5$ inside a 3-standard-deviation neighbourhood) is our own definition. It is fairly lenient, which is why we also report the raw capture values.
 * GPU training is not bit-for-bit deterministic, so retraining without the cache can change the last digits of some metrics.
 
