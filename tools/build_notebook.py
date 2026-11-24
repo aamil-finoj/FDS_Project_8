@@ -57,6 +57,34 @@ all the maths, experiments, plots and interpretation. Every number and figure be
 the code in this notebook. Nothing is typed in by hand.
 """)
 
+# =============================================================================== 0.5. Colab / local setup
+code(r"""
+import sys, os
+
+# ---------------------------------------------------------------------------
+# Google Colab compatibility -- this block is a strict no-op when run locally
+# ---------------------------------------------------------------------------
+IN_COLAB = "google.colab" in sys.modules
+if IN_COLAB:
+    import subprocess
+    # Clone the repository if it is not already present
+    if not os.path.isdir("FDS_Project_8"):
+        subprocess.run(
+            ["git", "clone", "--quiet", "https://github.com/aamil-finoj/FDS_Project_8.git"],
+            check=True,
+        )
+    os.chdir("FDS_Project_8")
+    # Install any dependencies not pre-installed on Colab (torch already is)
+    subprocess.run(
+        [sys.executable, "-m", "pip", "install", "-q",
+         "scipy>=1.13", "matplotlib>=3.8", "pandas>=2.2", "numpy>=2.0"],
+        check=True,
+    )
+    print("Colab setup done. Working directory:", os.getcwd())
+else:
+    print("Running locally. Working directory:", os.getcwd())
+""")
+
 # =============================================================================== 1. setup
 md(r"""
 ## 1. Setup: imports, configuration, seeds, device
@@ -1730,7 +1758,7 @@ draw exactly: very sharp peaks, hard edges and the prior's jump at $t=0$.
 
 nb = nbf.v4.new_notebook()
 nb.cells = CELLS
-nb.metadata["kernelspec"] = {"name": "scaf-project8", "display_name": "Python (scaf-project8)", "language": "python"}
+nb.metadata["kernelspec"] = {"name": "python3", "display_name": "Python 3", "language": "python"}
 nb.metadata["language_info"] = {"name": "python"}
 out = Path(__file__).resolve().parents[1] / "Project8_Inverse_Problems.ipynb"
 nbf.write(nb, out)
