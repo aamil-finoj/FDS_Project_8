@@ -206,7 +206,7 @@ imply a correct density.
 * **Every MDN with $M\ge2$ recovered the rare branch, in 60 of 60 runs**, even at 97:3, where only
   about 300 training points lie on that branch.
 * It wasn't perfect: minority capture dropped from about 1.0 to about 0.9 (the rare branch is
-  slightly under-weighted), and variation across seeds grew with the imbalance (sd of minority capture over seeds: about 0.04 at $q=0.5$, 0.07 at $q=0.9$, 0.16 at $q=0.97$; $M\ge2$).
+  slightly under-weighted), and variation across seeds grew with the imbalance (sd of minority capture over seeds: about 0.03 at $q=0.5$, 0.07 at $q=0.9$, 0.16 at $q=0.97$; $M\ge2$).
 * $M=1$ **never** recovers it, whatever the seed. This is a capacity limit, not a training problem.
 * **What actually breaks recovery:** a variance floor wider than the true branch width
   ($v_{\min}=0.1$: capture 0.43, excess NLL 0.91). At $N=10\,000$ and $q\le0.97$, initialisation and
