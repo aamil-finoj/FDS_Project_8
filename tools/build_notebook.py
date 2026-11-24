@@ -1420,7 +1420,7 @@ savefig(fig, "08_noise_densities"); plt.show()
 md(r"""
 **What the noise sweep shows.** We did not assume a direction in advance, and the results are not
 uniformly "more noise is worse":
-* **The MDN's excess NLL is highest at the *smallest* noise.** At $\sigma=0.05$ it is about 0.05 ($q=0.5$) and 0.09 ($q=0.9$), against about 0.025–0.035 for $\sigma\ge0.15$. With little noise the branches are extremely narrow (std $\sigma/(2\sqrt x)$, down to about 0.006), and the MDN underestimates the peak heights (top row of the density figure). A small error in the width or location of a very sharp peak costs a lot of log-likelihood.
+* **The MDN's excess NLL is highest at the *smallest* noise.** At $\sigma=0.05$ it is about 0.05 ($q=0.5$) and 0.09 ($q=0.9$), against about 0.025–0.035 for $\sigma\ge0.15$. With little noise the branches are extremely narrow (std $\sigma/(2\sqrt x)$, down to about 0.0125 at $x=a^2$), and the MDN underestimates the peak heights (top row of the density figure). A small error in the width or location of a very sharp peak costs a lot of log-likelihood.
 * **W1 and the branch-probability error show no clear trend with $\sigma$.** They stay around 0.03–0.06 and 0.014–0.030 for the MDN. W1 measures *how far* mass is misplaced, and the misplacement stays small in $t$ units even when the NLL penalty is large.
 * **Branch recovery stays at 100% at every noise level, for both priors** (scored only on $[2\sigma, a^2-2\sigma]$, where two branches exist). Minority capture stays between about 0.90 and 0.98.
 * **The single Gaussian gets *relatively* better as noise grows.** Its excess NLL falls from about 2.5–2.6 at $\sigma=0.05$ to about 0.8 at $\sigma=0.5$, and its capture rises. This is not because it learns the branches: more noise widens and blurs the true posterior, so one wide bell is a less terrible approximation. It is still about 25 times worse than the MDN in excess NLL at $\sigma=0.5$.
@@ -1718,7 +1718,7 @@ about 0.01 nats, concentrated near $t=0$, and leaves branch probabilities and re
   matters, and we cannot separate it from the effect of $N$.
 * A Gaussian mixture cannot represent the hard support edges or the prior's jump at $t=0$ exactly. Our grid metrics truncate the MDN to $[-a,a]$, and we report the leaked mass separately (about 0.7% for the MDN). The truncated MDN of §5.5 fixes the edges but not the jump.
 * The branch-recovery threshold (capture $\ge0.5$ inside a 3-standard-deviation neighbourhood) is our own definition. It is fairly lenient, which is why we also report the raw capture values.
-* GPU training is not bit-for-bit deterministic, so retraining without the cache can change the last digits of some metrics.
+* Training is not bit-for-bit deterministic (run-to-run differences also occur on CPU), so retraining without the cache can change the last digits of some metrics.
 
 **Bottom line.** The point is not simply "MDN beats MSE". MSE answers a different question: it
 returns the average of the valid solutions, which is usually not a valid solution itself. A
