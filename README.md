@@ -143,7 +143,7 @@ $t=30$, while logsumexp gives −3105.
 This is literally the MDN with $M=1$: the same code, a different $M$. It models uncertainty, but with
 only one bump.
 
-### Experiments (~190 networks)
+### Experiments (~265 networks)
 
 | Experiment | What varies | Runs |
 |---|---|---|
@@ -154,6 +154,9 @@ only one bump.
 | Noise robustness | $\sigma\in\lbrace 0.05,0.15,0.3,0.5\rbrace$ × $q\in\lbrace 0.5,0.9\rbrace$ × $M\in\lbrace 1,3\rbrace$ | 80 |
 | MSE networks | $q\in\lbrace 0.5,0.9\rbrace$ | 2 |
 | MAE (median) networks, §4.1 | $q\in\lbrace 0.5,0.9\rbrace$ × 5 seeds | 10 |
+| Truncated MDN, §5.5 | standard vs truncated components, $M=3$ × 5 seeds | 5 new |
+| Sample size, §7.5 | $N_{\rm train}\in\lbrace 1000,2500,10000\rbrace$ × $q\in\lbrace 0.9,0.97,0.99\rbrace$, plus spread init at $q=0.99$, × 5 seeds | 50 new |
+| Prior jump, §8.3 | $M\in\lbrace 5,8\rbrace$ at σ = 0.5, $q\in\lbrace 0.5,0.9\rbrace$ × 5 seeds (rest reused from the noise sweep) | 20 new |
 
 Overlapping settings are trained once and reused. The dataset is fixed by `data_seed`, so only the
 initialisation seed varies and the spread across seeds isolates optimisation randomness.
@@ -171,9 +174,10 @@ initialisation seed varies and the spread across seeds isolates optimisation ran
 | **Forward residual** | $r=x-\tilde t^2$, with $\tilde t$ sampled from the model | If the model is exact, $r\sim\mathcal N(0,\sigma^2)$. The target is sd ≈ σ, **not 0**, because the data is noisy |
 
 A Gaussian mixture has unbounded support, while the true posterior lives on $[-a,a]$. We report the
-leaked mass separately (about 0.7–0.9% for the standard MDN) and truncate only for the grid-based
-metrics; in §5.5 we also evaluate a truncated-component MDN (`MDNConfig(truncate=True)`), which
-eliminates out-of-support leakage (`0.000`) and cuts baseline excess NLL from ~0.031 to ~0.019 nats.
+leaked mass separately (about 0.7% for the standard MDN) and truncate only for the grid-based
+metrics. In §5.5 we also train a truncated-component MDN (`MDNConfig(truncate=True)`). It leaks
+nothing and lowers the baseline excess NLL from 0.030 to 0.018 nats, better on every seed. Its W1 is
+not better (0.048 vs 0.040), because W1 already truncates the standard MDN.
 
 ---
 
@@ -205,18 +209,22 @@ imply a correct density.
   slightly under-weighted), and variation across seeds grew with the imbalance.
 * $M=1$ **never** recovers it, whatever the seed. This is a capacity limit, not a training problem.
 * **What actually breaks recovery:** a variance floor wider than the true branch width
-  ($v_{\min}=0.1$: capture 0.43, excess NLL 0.91).
+  ($v_{\min}=0.1$: capture 0.43, excess NLL 0.91). At $N=10\,000$ and $q\le0.97$, initialisation and
+  $M>2$ hardly matter.
 * **MSE can't see any of this:** at $q=0.9$ the MSE is about 0.473 for every $M$, while the excess
   NLL ranges from 0.035 to 1.6.
-* **Small-data & extreme imbalance stress test (Rohan's extension, §7.5):**
-  * Swept $N_{\rm train} \in \{1000, 2500, 10000\}$ across $q \in \{0.90, 0.97, 0.99\}$.
-  * At $N=1000$ and $q=0.97$ (only ~30 minority points), recovery is still **100%**.
-  * The collapse threshold occurs when minority points drop to $\approx 10$ ($N=1000, q=0.99$), where default init capture falls to 0.43 (recovery 26.7%).
-  * Under this failure regime, **spread initialisation** acts as an effective inductive bias, lifting capture to 0.587 (above the 0.5 recovery threshold).
+* **Smaller training sets and 99:1 imbalance (§7.5):** $N_{\rm train}\in\lbrace 1000,2500,10000\rbrace$ ×
+  $q\in\lbrace 0.9,0.97,0.99\rbrace$, standard training with the step budget held fixed.
+  * Down to about **30 minority points** ($N=1000$, $q=0.97$) the rare branch is recovered on every seed.
+  * At about **10 minority points** ($N=1000$, $q=0.99$) it breaks: capture 0.49 ± 0.23, and 2 of 5 seeds
+    lose the branch. Spread initialisation does not rescue this.
+  * At $q=0.99$, $N=2500$ recovered fully but $N=10\,000$ only on 77% of the recovery grid. With one
+    dataset per $N$, we read this as variation between dataset draws, not an effect of $N$. Spread
+    initialisation did help at $N=10\,000$ (77% to 99%).
 
 <p align="center"><img src="figures/07_asym_densities_seeds.png" width="850"></p>
 <p align="center"><img src="figures/07_sample_size_stress_test.png" width="850"><br>
-<em>Sample-size stress test: minority capture, recovery rate, and excess NLL vs N_train for q in {0.90, 0.97, 0.99}.</em></p>
+<em>Sample-size stress test: minority capture, recovered fraction and excess NLL vs N_train for q in {0.9, 0.97, 0.99} (dots = seeds).</em></p>
 
 ### Noise robustness (extension)
 * Both branches were recovered at **every** noise level from σ = 0.05 to 0.5.
@@ -227,7 +235,7 @@ imply a correct density.
 * The prior's jump at $t=0$ (§8.3): with $q=0.9$ the exact posterior has a step at $t=0$ at **every**
   noise level, because $p(s\mid x)/p(-s\mid x)=q/(1-q)$ for all $s>0$. High noise only widens the range of
   inputs where it shows (19% of inputs at σ = 0.05, 51% at σ = 0.5). The MDN draws it as a ramp about
-  0.1–0.2 wide, which costs about 0.01–0.02 nats of NLL near $t=0$ but does not change branch
+  0.1–0.2 wide, which costs at most about 0.01 nats of NLL (0.002 at σ = 0.05 to 0.012 at σ = 0.5) but does not change branch
   probabilities or recovery. Going from $M=3$ to $M=8$ does not sharpen it.
 
 <p align="center"><img src="figures/08_noise_metrics.png" width="900"></p>
@@ -242,11 +250,14 @@ the median. For a multimodal posterior these can land where the density is nearl
 likelihood instead minimises $\mathrm{KL}(p\,\Vert\,p_\theta)$, which forces the model to put mass on
 **every** branch. The MDN's remaining errors sit exactly where the true posterior has features a
 Gaussian mixture can't express: hard support edges, the prior's discontinuity at 0, and very sharp
-peaks. Truncated mixtures or normalising flows would be natural next steps.
+peaks. Our truncated MDN (§5.5) removes the edge problem. A separate sign model or a normalising
+flow would be the natural next step for the jump at 0.
 
 **Limitations.**
 
-* The main sweeps used 10k data points; our sample size stress test (§7.5) explored $N \in \{1000, 2500\}$ and confirmed branch recovery down to ~30 minority points ($N=1000, q=0.97$), locating the failure boundary at $\approx 10$ points ($N=1000, q=0.99$). Network depth/width variations remain an open exploration.
+* One network size (3×64). Apart from §7.5, one training-set size (10k).
+* One dataset per setting (`data_seed` fixed). Seeds vary only the initialisation, so at very few
+  minority points (§7.5) the draw of rare points and the effect of $N$ cannot be separated.
 * The capture ≥ 0.5 threshold for "recovered" is our own, fairly lenient definition, so the raw
   capture values are reported too.
 * GPU training isn't bit-for-bit deterministic, so retraining without the cache can change the last
@@ -268,6 +279,7 @@ peaks. Truncated mixtures or normalising flows would be natural next steps.
 | `tools/build_notebook.py` | Generates the notebook (edit cells here) |
 | `tests/sanity_check.py` | Standalone checks of the reference and the MDN |
 | `tests/test_reference.py` | Fast standalone tests of the exact posterior (Part 1): numpy and scipy only, runs in seconds |
+| `tests/test_mdn.py` | Standalone checks of the standard and truncated MDN (normalisation, stability, sampling, training) |
 | `TASK_SPLIT.md` | Who does which part of the project |
 | `figures/` | All figures |
 | `artifacts/results/` | CSV result tables + `settings.json` |
