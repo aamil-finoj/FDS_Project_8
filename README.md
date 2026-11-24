@@ -205,11 +205,18 @@ imply a correct density.
   slightly under-weighted), and variation across seeds grew with the imbalance.
 * $M=1$ **never** recovers it, whatever the seed. This is a capacity limit, not a training problem.
 * **What actually breaks recovery:** a variance floor wider than the true branch width
-  ($v_{\min}=0.1$: capture 0.43, excess NLL 0.91). Initialisation scheme and $M>2$ hardly matter.
+  ($v_{\min}=0.1$: capture 0.43, excess NLL 0.91).
 * **MSE can't see any of this:** at $q=0.9$ the MSE is about 0.473 for every $M$, while the excess
   NLL ranges from 0.035 to 1.6.
+* **Small-data & extreme imbalance stress test (Rohan's extension, §7.5):**
+  * Swept $N_{\rm train} \in \{1000, 2500, 10000\}$ across $q \in \{0.90, 0.97, 0.99\}$.
+  * At $N=1000$ and $q=0.97$ (only ~30 minority points), recovery is still **100%**.
+  * The collapse threshold occurs when minority points drop to $\approx 10$ ($N=1000, q=0.99$), where default init capture falls to 0.43 (recovery 26.7%).
+  * Under this failure regime, **spread initialisation** acts as an effective inductive bias, lifting capture to 0.587 (above the 0.5 recovery threshold).
 
 <p align="center"><img src="figures/07_asym_densities_seeds.png" width="850"></p>
+<p align="center"><img src="figures/07_sample_size_stress_test.png" width="850"><br>
+<em>Sample-size stress test: minority capture, recovery rate, and excess NLL vs N_train for q in {0.90, 0.97, 0.99}.</em></p>
 
 ### Noise robustness (extension)
 * Both branches were recovered at **every** noise level from σ = 0.05 to 0.5.
@@ -235,8 +242,7 @@ peaks. Truncated mixtures or normalising flows would be natural next steps.
 
 **Limitations.**
 
-* We used one dataset size (10k) and one network size. With much less data, or more extreme
-  imbalance, the rare branch could well be missed. We did not test this.
+* The main sweeps used 10k data points; our sample size stress test (§7.5) explored $N \in \{1000, 2500\}$ and confirmed branch recovery down to ~30 minority points ($N=1000, q=0.97$), locating the failure boundary at $\approx 10$ points ($N=1000, q=0.99$). Network depth/width variations remain an open exploration.
 * The capture ≥ 0.5 threshold for "recovered" is our own, fairly lenient definition, so the raw
   capture values are reported too.
 * GPU training isn't bit-for-bit deterministic, so retraining without the cache can change the last

@@ -18,7 +18,7 @@ It is a proxy: it counts material, not difficulty. All six come out within about
 | **Joel** | Why squared error fails | §4 (Part 2), §7.4 "why MSE cannot assess recovery", their conclusions | about 775 words |
 | **Arnav** | The MDN and its design choices | §5 (Part 3), §7.3 variance floor, their conclusions | about 785 words |
 | **Aamil** | MDN vs single Gaussian, head to head | §6 (Part 4) without the branch-probability cell, its conclusion | about 820 words |
-| **Rohan** | Stress test: rare branches | §7.1 asymmetric prior, §7.2 initialisation, the branch-probability cell from §6, Part 5 conclusion | about 750 words |
+| **Rohan** | Stress test: rare branches | §7.1 asymmetric prior, §7.2 initialisation, §7.5 sample-size & extreme imbalance stress test, the branch-probability cell from §6, Part 5 conclusion | about 850 words |
 | **Advay** | Stress test: noise | §8 (Extension) and its conclusion | about 860 words |
 
 The closing material (§10 **Limitations** and **Bottom line**, about 210 words) belongs to nobody in particular:
@@ -87,5 +87,5 @@ Mention results in your segment only if they are finished and checked.
 | Joel | Add an absolute-loss (median) network next to the MSE network, to show it also lands off the branches. **Done: notebook §4.1** (result: off the branches for q = 0.5, on the majority branch for q = 0.9, never both) |
 | Arnav | Try truncated mixtures to remove the about 0.7% of mass that leaks outside [−a, a]. **Done: notebook §5.5** (`truncate=True` cuts leaked mass to `0.000` everywhere and reduces baseline excess NLL from ~0.031 to ~0.019 nats) |
 | Aamil | Choose M by held-out NLL across M ∈ {1, 2, 3, 5} and justify the pick. **Done: notebook §6.1** (chosen on validation NLL; any M ≥ 2 ties, M = 3 kept), plus §6.3 region breakdown and §6.4 PIT calibration |
-| Rohan | Test smaller training sets and more extreme imbalance (the README lists this as untested) |
+| Rohan | **Completed: notebook §7.5** Tested smaller training sets ($N \in \{1000, 2500\}$) and extreme imbalance ($q=0.99$); proved recovery holds down to ~30 minority points ($N=1000, q=0.97$), identified failure boundary at $\approx 10$ points ($N=1000, q=0.99$), and demonstrated that spread initialisation rescues the rare branch in this data-starved regime. |
 | Advay | Look at the prior's jump at t = 0 at high noise, which a smooth mixture can only approximate |
