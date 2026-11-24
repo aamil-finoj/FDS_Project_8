@@ -67,20 +67,23 @@ import sys, os
 IN_COLAB = "google.colab" in sys.modules
 if IN_COLAB:
     import subprocess
-    # Clone the repository if it is not already present
-    if not os.path.isdir("FDS_Project_8"):
-        subprocess.run(
-            ["git", "clone", "--quiet", "https://github.com/aamil-finoj/FDS_Project_8.git"],
-            check=True,
-        )
-    os.chdir("FDS_Project_8")
+    # If src/p8 is not in current working directory, locate or clone it
+    if not os.path.isdir("src/p8"):
+        if os.path.isdir("FDS_Project_8/src/p8"):
+            os.chdir("FDS_Project_8")
+        else:
+            subprocess.run(
+                ["git", "clone", "https://github.com/aamil-finoj/FDS_Project_8.git"],
+                check=True,
+            )
+            os.chdir("FDS_Project_8")
     # Install any dependencies not pre-installed on Colab (torch already is)
     subprocess.run(
         [sys.executable, "-m", "pip", "install", "-q",
          "scipy>=1.13", "matplotlib>=3.8", "pandas>=2.2", "numpy>=2.0"],
         check=True,
     )
-    print("Colab setup done. Working directory:", os.getcwd())
+    print("Colab setup complete. Working directory:", os.getcwd())
 else:
     print("Running locally. Working directory:", os.getcwd())
 """)
