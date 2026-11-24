@@ -192,7 +192,7 @@ not better (0.048 vs 0.040), because W1 already truncates the standard MDN.
 | **MDN ($M=3$)** | **0.03** | **0.04** | **0.94** | **0.013** | 1.338 |
 | Exact posterior | 0 | 0 | 0.96 | 0.012 | 1.339 |
 
-¹ mean over 5 seeds. ² seed-0 model, held-out test set (20 posterior samples per observation for the residuals).
+¹ mean over 5 seeds. ² seed-0 model, held-out test set (20 posterior samples per observation for the residuals). Test MSE is also the seed-0 model (the 5-seed mean for $M=3$ is 1.341).
 
 All models have essentially the same MSE, but only the MDN has the right distribution.
 On **validation** NLL any $M\ge2$ is as good as any other ($M=2,3,5$ within one seed-sd), so $M=3$ is a
@@ -206,7 +206,7 @@ imply a correct density.
 * **Every MDN with $M\ge2$ recovered the rare branch, in 60 of 60 runs**, even at 97:3, where only
   about 300 training points lie on that branch.
 * It wasn't perfect: minority capture dropped from about 1.0 to about 0.9 (the rare branch is
-  slightly under-weighted), and variation across seeds grew with the imbalance.
+  slightly under-weighted), and variation across seeds grew with the imbalance (sd of minority capture over seeds: about 0.04 at $q=0.5$, 0.07 at $q=0.9$, 0.16 at $q=0.97$; $M\ge2$).
 * $M=1$ **never** recovers it, whatever the seed. This is a capacity limit, not a training problem.
 * **What actually breaks recovery:** a variance floor wider than the true branch width
   ($v_{\min}=0.1$: capture 0.43, excess NLL 0.91). At $N=10\,000$ and $q\le0.97$, initialisation and
@@ -229,7 +229,7 @@ imply a correct density.
 ### Noise robustness (extension)
 * Both branches were recovered at **every** noise level from σ = 0.05 to 0.5.
 * Counterintuitively, the excess NLL is **worst at the smallest noise** (0.09 at σ = 0.05, $q=0.9$).
-  The branches become very sharp (sd ≈ 0.006), and small width errors cost a lot of log-likelihood.
+  The branches become very sharp (sd ≈ $\sigma/(2\sqrt{x})$, about 0.0125 to 0.025 for $x$ between 4 and 1), and small width errors cost a lot of log-likelihood.
 * The single Gaussian looks *relatively* better at high noise only because the true posterior itself
   gets blurrier.
 * The prior's jump at $t=0$ (§8.3): with $q=0.9$ the exact posterior has a step at $t=0$ at **every**
@@ -260,8 +260,8 @@ flow would be the natural next step for the jump at 0.
   minority points (§7.5) the draw of rare points and the effect of $N$ cannot be separated.
 * The capture ≥ 0.5 threshold for "recovered" is our own, fairly lenient definition, so the raw
   capture values are reported too.
-* GPU training isn't bit-for-bit deterministic, so retraining without the cache can change the last
-  digits of some metrics.
+* Training isn't bit-for-bit deterministic (we saw run-to-run differences on CPU as well as GPU), so
+  retraining without the cache can change the last digits of some metrics.
 
 ---
 
@@ -274,6 +274,7 @@ flow would be the natural next step for the jump at 0.
 | `src/p8/models.py` | MSE network and MDN (single Gaussian = MDN with $M=1$) |
 | `src/p8/training.py` | Training loop, early stopping, run caching |
 | `src/p8/evaluate.py` | NLL, sampling, branch metrics, Wasserstein-1 |
+| `src/p8/plotting.py` | Shared plot style and small figure helpers |
 | `src/p8/experiments.py` | Multi-seed sweep helpers |
 | `src/p8/data.py`, `config.py` | Data generator, seeding, all settings |
 | `tools/build_notebook.py` | Generates the notebook (edit cells here) |
@@ -309,7 +310,7 @@ python -m ipykernel install --user --name scaf-project8
 jupyter nbconvert --to notebook --execute --inplace --ExecutePreprocessor.timeout=-1 Project8_Inverse_Problems.ipynb
 ```
 
-* A full run from scratch trains about 180 small networks: roughly 1.5 h on an RTX 3050 laptop GPU.
+* A full run from scratch trains about 265 small networks (see §3): expect roughly 2 h on an RTX 3050 laptop GPU (an estimate scaled from the earlier ~180-network run, which took about 1.5 h).
 * Trained runs are cached in `artifacts/cache/` under a hash of every setting, so re-runs take about
   10 minutes. Delete that folder to retrain from scratch. It is git-ignored, so a fresh clone always
   trains from scratch the first time.

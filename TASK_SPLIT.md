@@ -66,7 +66,7 @@ rare branch recovered in 60 of 60 runs for M ≥ 2 at up to 97:3; M = 1 never; b
 
 **Limitations and bottom line** (README §6, notebook §10): one dataset size and one network size were tested, so
 much less data or more extreme imbalance may miss the rare branch (untested); "recovered" is our own lenient
-threshold (capture ≥ 0.5); GPU training isn't bit-for-bit repeatable; the point is not "MDN beats MSE" but that MSE
+threshold (capture ≥ 0.5); training isn't bit-for-bit repeatable (CPU or GPU); the point is not "MDN beats MSE" but that MSE
 answers a different question.
 
 **Cross-check (do this before presenting).** Each person writes two questions an examiner could ask about the *next*
@@ -74,7 +74,7 @@ person's segment (Ashwath → Joel → Arnav → Aamil → Rohan → Advay → A
 If someone can't answer, that segment's owner revises their slides.
 
 **Running things.** You rarely need to retrain: all figures are in `figures/` and all numbers in
-`artifacts/results/*.csv`. A full retrain takes about 1.5 h; setup is in README §8.
+`artifacts/results/*.csv`. A full retrain trains about 265 networks (roughly 2 h on a laptop GPU); setup is in README §8.
 
 ## 4. Optional optimisation ideas (one per person)
 
