@@ -269,7 +269,7 @@ flow would be the natural next step for the jump at 0.
 
 | Path | Contents |
 |---|---|
-| `Project8_Inverse_Problems.ipynb` | Master notebook: Parts 1–5 + extension, executed |
+| `Project8_Inverse_Problems.ipynb` | Master notebook: Parts 1–5 + extension (outputs cleared; run it to regenerate) |
 | `src/p8/reference.py` | Exact posterior via quadrature, modes, region classification |
 | `src/p8/models.py` | MSE network and MDN (single Gaussian = MDN with $M=1$) |
 | `src/p8/training.py` | Training loop, early stopping, run caching |
