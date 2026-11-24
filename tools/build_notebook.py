@@ -1353,7 +1353,7 @@ uniformly "more noise is worse":
 * **W1 and the branch-probability error show no clear trend with $\sigma$.** They stay around 0.03–0.06 and 0.014–0.030 for the MDN. W1 measures *how far* mass is misplaced, and the misplacement stays small in $t$ units even when the NLL penalty is large.
 * **Branch recovery stays at 100% at every noise level, for both priors** (scored only on $[2\sigma, a^2-2\sigma]$, where two branches exist). Minority capture stays between about 0.90 and 0.98.
 * **The single Gaussian gets *relatively* better as noise grows.** Its excess NLL falls from about 2.5–2.6 at $\sigma=0.05$ to about 0.8 at $\sigma=0.5$, and its capture rises. This is not because it learns the branches: more noise widens and blurs the true posterior, so one wide bell is a less terrible approximation. It is still about 25 times worse than the MDN in excess NLL at $\sigma=0.5$.
-* **A new feature appears at large noise:** for $q=0.9$ the reference posterior has a visible **jump at $t=0$**, inherited from the jump in the piecewise prior. When the noise blurs the branches together, mass near $t=0$ is weighted by $2q$ on one side and $2(1-q)$ on the other. A mixture of Gaussians can only approximate this step with a smooth ramp (bottom rows of the figure). This is another case where the exact posterior has structure, a discontinuity or a hard edge, that a Gaussian mixture cannot represent exactly.
+* **A feature that becomes visible at large noise:** for $q=0.9$ the reference posterior has a **jump at $t=0$**, inherited from the jump in the piecewise prior. When the noise blurs the branches together, mass near $t=0$ is weighted by $2q$ on one side and $2(1-q)$ on the other. A mixture of Gaussians can only approximate this step with a smooth ramp (bottom rows of the figure). This is another case where the exact posterior has structure, a discontinuity or a hard edge, that a Gaussian mixture cannot represent exactly. §8.3 measures how much this costs.
 
 **Answer to the extension question.** In our experiments, with 10 000 training points, the MDN
 recovered both inverse branches reliably across all imbalance levels (up to 97:3) and all noise
@@ -1362,6 +1362,176 @@ when the posterior has very sharp features (low noise), hard edges (the support 
 prior jump), or a very rare branch, where the seed-to-seed variability is largest. Recovery only
 broke down when the model was too constrained: one component, or a variance floor wider than the
 branches.
+""")
+
+md(r"""
+### 8.3 The prior's jump at $t=0$: how much does a smooth mixture lose?
+The piecewise prior puts weight $2q$ on $t\ge0$ and $2(1-q)$ on $t<0$. The likelihood
+$\exp[-(x-t^2)^2/2\sigma^2]$ is **even in $t$**, so for the exact posterior
+$$\frac{p(s\mid x)}{p(-s\mid x)}=\frac{q}{1-q}\quad\text{for every } s>0 \text{ and every } x .$$
+The exact *sign split* $\pi(s\mid x)=p(s\mid x)/\big(p(s\mid x)+p(-s\mid x)\big)$ is therefore the constant
+$q$, and the density itself jumps at $t=0$ by $p(0^+\mid x)-p(0^-\mid x)=(4q-2)\,e^{-x^2/2\sigma^2}/Z(x)$.
+A Gaussian mixture is smooth, so its sign split $\hat\pi(s\mid x)$ is exactly $1/2$ at $s=0$ and can only
+**ramp** up to $q$. The jump only matters where the posterior has mass near $t=0$: inputs with
+$x\lesssim2\sigma$ (no real inverse and merged branches). That is a small slice of the data at low noise and
+a large one at high noise, which is why the jump only became visible in the bottom rows of the figure above.
+
+**Question.** How wide is the MDN's ramp, how much likelihood does it cost, and does adding components help?
+**Measured** (per model, on the held-out test set):
+* `ramp_s90`: the $|t|$ at which the MDN's sign split reaches 90% of the way from $1/2$ to $q$. It is
+  pooled over the 400 evaluation inputs, weighting each $s$ by the reference mass at $|t|=s$.
+  The exact posterior has `ramp_s90` $=0$.
+* `sign_err` $=\mathbb E\,|\hat\pi(|t|\mid x)-q|$ over test points: how far the model's split between
+  $+|t|$ and $-|t|$ is from the true one, averaged over where the data actually lies.
+* `excess_near0` and `excess_rest`: the mean per-point excess NLL for test points with $|t|<0.25$ and
+  for all others, and `near0_frac`, the fraction of test points with $|t|<0.25$.
+
+**Control.** The symmetric prior ($q=0.5$) has the same likelihood and no jump. Anything the
+$q=0.9$ models lose near $t=0$ *beyond* the $q=0.5$ models is the price of the jump.
+**Changed:** $\sigma$ (with $M=3$), and $M\in\{3,5,8\}$ at $\sigma=0.5$. **Fixed:** everything else, 5 seeds.
+""")
+code(r"""
+W_ZERO = 0.25                          # "near zero": |t| < W_ZERO
+S_GRID = np.linspace(0.0, 1.0, 201)    # |t| values for the sign-split profile
+JUMP_M = [3, 5, 8]
+
+# The exact sign split really is the constant q (checked on the reference grids, sigma = 0.5, q = 0.9)
+_ctx = get_context(replace(BASE_DATA, sigma=0.5, q=0.9))
+_r = _ctx.ref_eval[:, T_GRID > 0], _ctx.ref_eval[:, T_GRID < 0][:, ::-1]
+print("max |pi(s|x) - q| for the exact posterior:", float(np.nanmax(np.abs(_r[0] / (_r[0] + _r[1]) - 0.9))))
+
+def jump_metrics(model, ctx):
+    q = ctx.dcfg.q
+    x_te, t_te = ctx.splits["test"]
+    d = ctx.ref_lp - E.log_prob_points(model, x_te, t_te)          # per-point excess NLL
+    near = np.abs(t_te) < W_ZERO
+    sign_err = np.abs(E.model_sign_split(model, x_te, t_te) - q)
+    # sign-split profile pooled over x_eval; each s is weighted by the reference mass at t = +-s
+    xs, ss = np.repeat(ctx.x_eval, len(S_GRID)), np.tile(S_GRID, len(ctx.x_eval))
+    pi_hat = E.model_sign_split(model, xs, ss).reshape(len(ctx.x_eval), len(S_GRID))
+    w = np.array([np.interp(S_GRID, T_GRID, r) + np.interp(-S_GRID, T_GRID, r) for r in ctx.ref_eval])
+    profile = (w * pi_hat).sum(0) / w.sum(0)
+    target = 0.5 + 0.9 * (q - 0.5)
+    ramp = S_GRID[np.argmax(profile >= target)] if q != 0.5 and (profile >= target).any() else np.nan
+    row = dict(ramp_s90=ramp, sign_err=sign_err.mean(), sign_err_near0=sign_err[near].mean(),
+               excess_near0=d[near].mean(), excess_rest=d[~near].mean(), near0_frac=near.mean(),
+               excess_nll=d.mean())
+    return row, profile
+
+jump_settings = [(s, q, 3) for s in SIGMAS for q in [0.5, 0.9]] + [(0.5, q, M) for q in [0.5, 0.9] for M in JUMP_M[1:]]
+jump_rows, profiles = [], {}
+for s, q, M in jump_settings:
+    d = replace(BASE_DATA, sigma=s, q=q)
+    ctx = get_context(d)
+    # inputs whose exact posterior has real mass at t = 0: p(0+ | x) >= 10% of the peak of p(. | x)
+    at0 = ctx.ref_eval[:, np.searchsorted(T_GRID, 0.0)] / ctx.ref_eval.max(1)
+    jump_visible = float(np.mean(at0 >= 0.1))
+    for seed in SEEDS:
+        row, prof = jump_metrics(get_model(d, TRAIN, MDNConfig(M=M), seed, use_cache=USE_CACHE), ctx)
+        row.update(sigma=s, q=q, M=M, seed=seed, jump_visible=jump_visible, ramp_rel=row["ramp_s90"] / np.sqrt(s))
+        jump_rows.append(row)
+        profiles[(s, q, M, seed)] = prof
+df_jump = pd.DataFrame(jump_rows)
+df_jump.to_csv(RESULTS / "extension_prior_jump.csv", index=False)
+
+JUMP_COLS = ["jump_visible", "ramp_s90", "ramp_rel", "sign_err", "excess_near0", "excess_rest", "excess_nll"]
+print(f"near-zero test points (|t| < {W_ZERO}): {df_jump.near0_frac.iloc[0]:.3f} of the test set at every sigma "
+      "(t comes from the prior, so this does not depend on sigma)")
+print("MDN M = 3 across noise levels")
+display(mean_sd_table(df_jump[df_jump.M == 3], ["q", "sigma"], JUMP_COLS))
+print("sigma = 0.5 across the number of components")
+display(mean_sd_table(df_jump[df_jump.sigma == 0.5], ["q", "M"], JUMP_COLS[2:]))
+
+# Price of the jump: extra excess NLL on near-zero points for q = 0.9 beyond the no-jump control q = 0.5,
+# scaled by the share of near-zero points, as a fraction of the q = 0.9 model's total excess NLL (M = 3)
+g = df_jump[df_jump.M == 3].groupby(["sigma", "q"])
+mean, se = g[["excess_near0", "excess_nll"]].mean(), g["excess_near0"].std() / np.sqrt(len(SEEDS))
+near0 = df_jump.near0_frac.mean()
+cost = pd.DataFrame({s: {"jump cost (nats)": near0 * (mean.loc[(s, 0.9), "excess_near0"] - mean.loc[(s, 0.5), "excess_near0"]),
+                         "± (se)": near0 * np.hypot(se[(s, 0.9)], se[(s, 0.5)]),
+                         "total excess NLL, q = 0.9": mean.loc[(s, 0.9), "excess_nll"]} for s in SIGMAS}).T
+cost["share of total"] = cost["jump cost (nats)"] / cost["total excess NLL, q = 0.9"]
+cost.index.name = "sigma"
+print("price of the jump (MDN M = 3)")
+display(cost.round(3))
+""")
+code(r"""
+fig, axes = plt.subplots(1, 4, figsize=(20, 4))
+
+# (a) the step and the ramp at x = 0, where the posterior is one bump centred on the jump
+ax, s_hi = axes[0], SIGMAS[-1]
+d = replace(BASE_DATA, sigma=s_hi, q=0.9)
+tz = T_GRID[np.abs(T_GRID) <= 1.5]
+ax.plot(tz, R.reference_density_grid([0.0], tz, A, s_hi, 0.9)[0], color=COLORS["reference"], lw=2.5, label="reference")
+for M, ls in [(3, "--"), (8, ":")]:
+    ax.plot(tz, E.predict_conditional_density(get_model(d, TRAIN, MDNConfig(M=M), 0, use_cache=True), [0.0], tz)[0],
+            color=COLORS["mdn"], lw=1.8, ls=ls, label=f"MDN M={M}")
+ax.set(xlabel="t", ylabel=r"$p(t\mid x=0)$", title=f"(a) density at x = 0, σ = {s_hi}, q = 0.9")
+ax.legend(fontsize=8)
+
+# (b) the sign split as a function of |t|: exact = q everywhere, the MDN ramps up from 1/2
+ax = axes[1]
+for s, c in zip(SIGMAS, plt.cm.viridis(np.linspace(0, 0.9, len(SIGMAS)))):
+    p = np.mean([profiles[(s, 0.9, 3, k)] for k in SEEDS], axis=0)
+    ax.plot(S_GRID, p, color=c, lw=1.8, label=f"MDN M=3, σ = {s}")
+ax.axhline(0.9, color=COLORS["reference"], lw=2.5, label="reference (= q)")
+ax.axhline(0.5, color="grey", lw=0.8, ls=":")
+ax.set(xlabel="|t|", ylabel=r"sign split $\hat\pi(|t|)$", title="(b) sign split vs |t| (q = 0.9, mean of 5 seeds)",
+       ylim=(0.45, 0.95))
+ax.legend(fontsize=8)
+
+# (c) excess NLL near t = 0 vs elsewhere, q = 0.9 against the no-jump control q = 0.5
+ax = axes[2]
+for q, ls in [(0.9, "-"), (0.5, "--")]:
+    for col, c, lab in [("excess_near0", COLORS["mdn"], "|t| < 0.25"), ("excess_rest", COLORS["single"], "|t| ≥ 0.25")]:
+        g = df_jump[(df_jump.q == q) & (df_jump.M == 3)].groupby("sigma")[col]
+        ax.errorbar(g.mean().index, g.mean(), yerr=g.std(), color=c, ls=ls, marker="o", capsize=3, label=f"{lab}, q = {q}")
+ax.set(xlabel=r"noise $\sigma$", ylabel="mean excess NLL per point (nats)", xticks=SIGMAS,
+       title="(c) excess NLL near t = 0 vs elsewhere (MDN M=3)")
+ax.legend(fontsize=8)
+
+# (d) the same jump at low noise: the step is there for x near 0 whatever sigma is
+ax, s_lo = axes[3], SIGMAS[0]
+d = replace(BASE_DATA, sigma=s_lo, q=0.9)
+tz = T_GRID[np.abs(T_GRID) <= 0.6]
+ax.plot(tz, R.reference_density_grid([0.0], tz, A, s_lo, 0.9)[0], color=COLORS["reference"], lw=2.5, label="reference")
+ax.plot(tz, E.predict_conditional_density(get_model(d, TRAIN, MDNConfig(M=3), 0, use_cache=True), [0.0], tz)[0],
+        color=COLORS["mdn"], lw=1.8, ls="--", label="MDN M=3")
+ax.set(xlabel="t", ylabel=r"$p(t\mid x=0)$", title=f"(d) density at x = 0, σ = {s_lo}, q = 0.9")
+ax.legend(fontsize=8)
+fig.suptitle("The prior's jump at t = 0: what a smooth mixture can and cannot draw")
+savefig(fig, "08_prior_jump"); plt.show()
+""")
+md(r"""
+**What the prior-jump analysis shows.**
+* **The exact sign split really is the constant $q$.** On the reference grids, $|\pi(s\mid x)-q|$ is below
+  $10^{-14}$ everywhere. The step at $t=0$ is therefore an exact property of the posterior, not a grid artefact.
+* **The jump is there at every noise level, not only at high noise.** The fraction of inputs whose posterior
+  has real mass at $t=0$ (at least 10% of its peak) grows from 19% at $\sigma=0.05$ to 51% at $\sigma=0.5$.
+  High noise does not create the step. It widens the range of $x$ where the step sits under a large part of
+  the posterior, which is why the §8.2 figure (inputs $x=0.25, 1, 2.5$) only showed it in the bottom rows.
+  Panel (d) shows the same step at $x=0$ and $\sigma=0.05$.
+* **The MDN draws the step as a ramp about 0.1–0.2 wide in $t$** (`ramp_s90`, panel b), at every noise level.
+  Measured against the width of the posterior near $t=0$ (about $\sqrt\sigma$), the ramp covers most of the
+  bump at $\sigma=0.05$ (`ramp_rel` about 0.8) and only a small part of it at $\sigma=0.5$ (about 0.16).
+  So, like the sharp branches in §8.2, the step is drawn *worst* at low noise, relative to the posterior.
+* **It costs likelihood locally, but it does not shift the branch probability.** Test points with
+  $|t|<0.25$ (about 12.5% of the data at every $\sigma$, because $t$ comes from the prior) carry an excess NLL of about
+  0.08–0.21 nats under $q=0.9$, against about 0–0.05 under the no-jump control. Scaled to the whole
+  test set this is about 0.01–0.02 nats, roughly a fifth to a half of the MDN's remaining excess NLL
+  (the standard errors are large, see the "price of the jump" table). The sign error averaged over the data,
+  however, is the same about 0.03 for $q=0.9$ and $q=0.5$. The ramp is a local shape error, narrow enough
+  that it does not measurably move mass between the positive and negative branches.
+* **More components do not sharpen the step.** At $\sigma=0.5$, going from $M=3$ to $M=8$ leaves the ramp
+  width (relative 0.16–0.18) and the total excess NLL (0.027–0.028) unchanged. The near-zero excess NLL
+  falls on average (0.10 to 0.04), but within the seed-to-seed spread. A sum of Gaussians is smooth
+  whatever $M$ is. To imitate a step it stacks components next to each other, which adds wiggles instead
+  (panel a, $M=3$).
+
+**Answer.** The prior's jump is a real limit of a Gaussian mixture, but a small one. It costs about 0.01–0.02
+nats of NLL, concentrated on the 12.5% of points nearest $t=0$. It leaves branch probabilities and
+recovery untouched, and more components do not fix it. Removing it would need a model that can represent
+a discontinuity at $t=0$, for example a separate sign probability times a density for $|t|$. We did not try this.
 """)
 
 # =============================================================================== 9. summary
@@ -1450,7 +1620,8 @@ sees the conditional mean.
 **Extension.** Recovery of both branches was robust to observation noise between 0.05 and 0.5. Density
 accuracy in NLL terms was worst at the *lowest* noise, where the posterior peaks are sharpest. The
 single Gaussian looked relatively less bad at high noise only because the true posterior itself
-becomes blurrier.
+becomes blurrier. The prior's jump at $t=0$ is drawn as a ramp about 0.1–0.2 wide whatever $M$ is. It costs about
+0.01–0.02 nats, concentrated near $t=0$, and leaves branch probabilities and recovery untouched.
 
 **Limitations.**
 * All main baseline results use one network size (3x64). While our §7.5 extension explored reduced dataset sizes ($N_{\rm train} \in \{1000, 2500\}$) and identified the breaking point at $N=1000, q=0.99$ (~10 minority points), network depth/width variations remain an open exploration.
