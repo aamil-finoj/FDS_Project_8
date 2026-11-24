@@ -88,4 +88,4 @@ Mention results in your segment only if they are finished and checked.
 | Arnav | Try truncated mixtures to remove the about 0.7% of mass that leaks outside [−a, a] |
 | Aamil | Choose M by held-out NLL across M ∈ {1, 2, 3, 5} and justify the pick. **Done: notebook §6.1** (chosen on validation NLL; any M ≥ 2 ties, M = 3 kept), plus §6.3 region breakdown and §6.4 PIT calibration |
 | Rohan | Test smaller training sets and more extreme imbalance (the README lists this as untested) |
-| Advay | Look at the prior's jump at t = 0 at high noise, which a smooth mixture can only approximate |
+| Advay | Look at the prior's jump at t = 0 at high noise, which a smooth mixture can only approximate. **Done: notebook §8.3** (the step exists at every noise level; the MDN draws it as a ramp about 0.1–0.2 wide, costing about 0.01–0.02 nats near t = 0 with branch probabilities unaffected; M = 8 does not sharpen it) |

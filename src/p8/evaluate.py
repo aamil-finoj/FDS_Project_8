@@ -14,7 +14,7 @@ Conventions
 """
 import numpy as np
 import torch
-from scipy.special import ndtr
+from scipy.special import expit, ndtr
 from scipy.stats import wasserstein_distance
 
 from .reference import reference_density_grid
@@ -235,3 +235,23 @@ def summarise_mdn(model, dcfg, splits, t_grid, x_eval, x_rec, ref_eval=None, ref
         "out_mass": float(np.mean(out_of_support_mass(model, x_eval, dcfg.a))),
         "mse_of_mean": mse_of_mean,
     }
+
+
+# --------------------------------------------------------------------- prior jump at t = 0
+def model_sign_split(model, x, s):
+    """pi_hat(s | x) = p_theta(s | x) / (p_theta(s | x) + p_theta(-s | x)) for paired arrays, s >= 0.
+
+    The likelihood exp(-(x - t^2)^2 / 2 sigma^2) is even in t, so for the exact posterior
+    p(s | x) / p(-s | x) = q / (1 - q) at EVERY s > 0: the true sign split is the constant q, a step
+    from 1 - q to q at s = 0. Any smooth model density gives pi_hat(0) = 1/2, so it can only ramp from
+    1/2 up to q. How far in s that ramp extends is the model's version of the prior jump.
+    """
+    pi, mu, var = mdn_params(model, x)
+    s = np.abs(np.asarray(s, dtype=float))[:, None]
+    # log-domain mixture densities at +s and -s, then a stable logistic of their difference
+    def logp(t):
+        lc = np.log(pi) - 0.5 * (t - mu) ** 2 / var - 0.5 * np.log(2 * np.pi * var)
+        mx = lc.max(-1, keepdims=True)
+        return (mx + np.log(np.exp(lc - mx).sum(-1, keepdims=True)))[:, 0]
+    return expit(logp(s) - logp(-s))
+

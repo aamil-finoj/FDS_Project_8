@@ -215,10 +215,14 @@ imply a correct density.
   The branches become very sharp (sd ≈ 0.006), and small width errors cost a lot of log-likelihood.
 * The single Gaussian looks *relatively* better at high noise only because the true posterior itself
   gets blurrier.
-* At high noise, the prior's jump at $t=0$ shows up in the posterior, and a smooth Gaussian mixture
-  can only approximate it.
+* The prior's jump at $t=0$ (§8.3): with $q=0.9$ the exact posterior has a step at $t=0$ at **every**
+  noise level, because $p(s\mid x)/p(-s\mid x)=q/(1-q)$ for all $s>0$. High noise only widens the range of
+  inputs where it shows (19% of inputs at σ = 0.05, 51% at σ = 0.5). The MDN draws it as a ramp about
+  0.1–0.2 wide, which costs about 0.01–0.02 nats of NLL near $t=0$ but does not change branch
+  probabilities or recovery. Going from $M=3$ to $M=8$ does not sharpen it.
 
 <p align="center"><img src="figures/08_noise_metrics.png" width="900"></p>
+<p align="center"><img src="figures/08_prior_jump.png" width="900"></p>
 
 ---
 
@@ -269,7 +273,7 @@ peaks. Truncated mixtures or normalising flows would be natural next steps.
 | §5 MDN: positivity, normalisation, stable likelihood | Part 3 |
 | §6 NLL vs single Gaussian, densities, branch probabilities, residuals | Part 4 |
 | §7 Asymmetric prior, $M$, initialisation, variance floor, why MSE fails | Part 5 |
-| §8 Branch error, recovery score, Wasserstein-1, noise sweep | Extension |
+| §8 Branch error, recovery score, Wasserstein-1, noise sweep, prior jump at $t=0$ | Extension |
 
 ---
 
