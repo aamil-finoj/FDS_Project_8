@@ -67,16 +67,28 @@ import sys, os
 IN_COLAB = "google.colab" in sys.modules
 if IN_COLAB:
     import subprocess
-    # If src/p8 is not in current working directory, locate or clone it
+    # If src/p8 is not in current working directory, locate, unzip or clone it
     if not os.path.isdir("src/p8"):
         if os.path.isdir("FDS_Project_8/src/p8"):
             os.chdir("FDS_Project_8")
+        elif os.path.isfile("FDS_Project_8.zip"):
+            import zipfile
+            with zipfile.ZipFile("FDS_Project_8.zip", "r") as z:
+                z.extractall(".")
+            if os.path.isdir("FDS_Project_8/src/p8"):
+                os.chdir("FDS_Project_8")
         else:
-            subprocess.run(
-                ["git", "clone", "https://github.com/aamil-finoj/FDS_Project_8.git"],
-                check=True,
-            )
-            os.chdir("FDS_Project_8")
+            try:
+                subprocess.run(
+                    ["git", "clone", "https://github.com/aamil-finoj/FDS_Project_8.git"],
+                    check=True,
+                )
+                os.chdir("FDS_Project_8")
+            except subprocess.CalledProcessError:
+                print("\n[!] Git clone failed. If the repository is private, either:")
+                print("    1. Make the repo PUBLIC on GitHub: Settings -> Danger Zone -> Change visibility -> Public")
+                print("    2. Or upload FDS_Project_8.zip / the FDS_Project_8 folder to the Colab files pane.\n")
+                raise
     # Install any dependencies not pre-installed on Colab (torch already is)
     subprocess.run(
         [sys.executable, "-m", "pip", "install", "-q",
